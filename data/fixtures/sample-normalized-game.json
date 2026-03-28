@@ -1,0 +1,72 @@
+{
+  "game_id": "mlb-2026-03-27-nyy-bos",
+  "sport_id": "MLB",
+  "scheduled_start": "2026-03-27T19:05:00Z",
+  "status": "scheduled",
+  "away": {
+    "team": {
+      "team_id": "nyy",
+      "sport_id": "MLB",
+      "abbreviation": "NYY",
+      "full_name": "New York Yankees",
+      "league": "AL",
+      "division": "East"
+    },
+    "probable_pitcher": {
+      "player_id": "gerrit-cole",
+      "starting_status": "confirmed",
+      "handedness": "R"
+    },
+    "lineup": null,
+    "lineup_confirmed": false
+  },
+  "home": {
+    "team": {
+      "team_id": "bos",
+      "sport_id": "MLB",
+      "abbreviation": "BOS",
+      "full_name": "Boston Red Sox",
+      "league": "AL",
+      "division": "East"
+    },
+    "probable_pitcher": {
+      "player_id": "chris-sale",
+      "starting_status": "confirmed",
+      "handedness": "L"
+    },
+    "lineup": null,
+    "lineup_confirmed": false
+  },
+  "venue": {
+    "venue_id": "fenway-park",
+    "name": "Fenway Park",
+    "city": "Boston",
+    "state": "MA",
+    "country": "USA",
+    "is_dome": false,
+    "is_retractable_roof": false,
+    "park_factor_runs": 1.04
+  },
+  "weather": {
+    "temperature_f": 52,
+    "wind_speed_mph": 12,
+    "wind_direction": "Out to RF",
+    "precipitation_chance": 5,
+    "conditions": "Partly Cloudy",
+    "dome_closed": null
+  },
+  "sources": [
+    {
+      "provider": "mlb-statsapi",
+      "endpoint": "/v1/schedule",
+      "fetched_at": "2026-03-27T15:00:00Z",
+      "raw_payload_hash": "abc123"
+    }
+  ],
+  "freshness": {
+    "is_stale": false,
+    "stale_reason": null,
+    "last_synced": "2026-03-27T15:00:00Z"
+  },
+  "raw_payload_refs": ["raw-mlb-2026-03-27-001"]
+}

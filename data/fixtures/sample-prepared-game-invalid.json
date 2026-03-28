@@ -1,0 +1,73 @@
+{
+  "game_id": "mlb-2026-03-27-nyy-bos",
+  "sport_id": "MLB",
+  "scheduled_start": "2026-03-27T19:05:00Z",
+  "prepared_at": "2026-03-27T20:10:00Z",
+  "venue": {
+    "park_factor_runs": 2.5,
+    "is_dome": false,
+    "is_retractable_roof": false
+  },
+  "weather": {
+    "temperature_f": 150,
+    "wind_speed_mph": 75,
+    "wind_direction_normalized": "out",
+    "is_enclosed": false
+  },
+  "away_team": {
+    "team_id": "nyy",
+    "team_woba": 0.341,
+    "team_runs_per_game": 5.1,
+    "team_k_rate": 0.226,
+    "team_bb_rate": 0.091,
+    "team_era": 3.72,
+    "team_whip": 1.18,
+    "bullpen_era": 3.45,
+    "lineup_batters_available": 2,
+    "lineup_avg_woba": 0.336
+  },
+  "home_team": {
+    "team_id": "bos",
+    "team_woba": 0.332,
+    "team_runs_per_game": 4.8,
+    "team_k_rate": 0.231,
+    "team_bb_rate": 0.088,
+    "team_era": 3.98,
+    "team_whip": 1.24,
+    "bullpen_era": 3.71,
+    "lineup_batters_available": 0,
+    "lineup_avg_woba": 0.327
+  },
+  "away_starter": null,
+  "home_starter": {
+    "player_id": "chris-sale",
+    "team_id": "nyy",
+    "handedness": "L",
+    "season_ip": 10,
+    "season_era": 30,
+    "season_whip": 10,
+    "season_k_per_9": 11.2,
+    "season_bb_per_9": 2.4,
+    "season_hr_per_9": 0.9,
+    "recent_starts_n": 1,
+    "recent_era": 3.41,
+    "recent_k_per_9": 11.0,
+    "recent_ip_per_start": 12,
+    "vs_lhb_era": 2.88,
+    "vs_rhb_era": 3.52,
+    "days_rest": 5,
+    "last_start_pitches": 94
+  },
+  "away_batters": [
+    { "player_id": "dup-1", "team_id": "nyy", "batting_order": 1, "handedness": "R", "season_pa": 10, "season_avg": 0.700, "season_obp": 0.200, "season_slg": 0.100, "season_woba": 0.900, "season_iso": 0.231, "season_k_rate": 0.221, "season_bb_rate": 0.107, "season_hr_rate": 0.062, "season_sb": 12, "recent_games_n": 10, "recent_woba": 0.352, "recent_avg": 0.273, "vs_lhp_woba": 0.381, "vs_rhp_woba": 0.366 },
+    { "player_id": "dup-1", "team_id": "nyy", "batting_order": 1, "handedness": "R", "season_pa": 10, "season_avg": 0.700, "season_obp": 0.200, "season_slg": 0.100, "season_woba": 0.900, "season_iso": 0.231, "season_k_rate": 0.221, "season_bb_rate": 0.107, "season_hr_rate": 0.062, "season_sb": 12, "recent_games_n": 10, "recent_woba": 0.352, "recent_avg": 0.273, "vs_lhp_woba": 0.381, "vs_rhp_woba": 0.366 }
+  ],
+  "home_batters": [],
+  "blocked": {
+    "is_blocked": true,
+    "blocked_reason": null
+  },
+  "has_both_starters": false,
+  "has_both_lineups": false,
+  "completeness_score": 1.5
+}

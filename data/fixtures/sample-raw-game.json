@@ -1,0 +1,19 @@
+{
+  "gamePk": 401999001,
+  "gameDate": "2026-03-27T19:05:00Z",
+  "status": {
+    "codedGameState": "S",
+    "detailedState": "Scheduled"
+  },
+  "teams": {
+    "away": {
+      "team": { "id": 147, "name": "New York Yankees" },
+      "probablePitcher": { "id": 543037, "fullName": "Gerrit Cole" }
+    },
+    "home": {
+      "team": { "id": 111, "name": "Boston Red Sox" },
+      "probablePitcher": { "id": 519242, "fullName": "Chris Sale" }
+    }
+  },
+  "venue": { "id": 3, "name": "Fenway Park" }
+}

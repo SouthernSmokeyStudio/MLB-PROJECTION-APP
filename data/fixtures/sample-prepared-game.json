@@ -1,0 +1,108 @@
+{
+  "game_id": "mlb-2026-03-27-nyy-bos",
+  "sport_id": "MLB",
+  "scheduled_start": "2026-03-27T19:05:00Z",
+  "prepared_at": "2026-03-27T15:10:00Z",
+  "venue": {
+    "park_factor_runs": 1.04,
+    "is_dome": false,
+    "is_retractable_roof": false
+  },
+  "weather": {
+    "temperature_f": 52,
+    "wind_speed_mph": 12,
+    "wind_direction_normalized": "out",
+    "is_enclosed": false
+  },
+  "away_team": {
+    "team_id": "nyy",
+    "team_woba": 0.341,
+    "team_runs_per_game": 5.1,
+    "team_k_rate": 0.226,
+    "team_bb_rate": 0.091,
+    "team_era": 3.72,
+    "team_whip": 1.18,
+    "bullpen_era": 3.45,
+    "lineup_batters_available": 9,
+    "lineup_avg_woba": 0.336
+  },
+  "home_team": {
+    "team_id": "bos",
+    "team_woba": 0.332,
+    "team_runs_per_game": 4.8,
+    "team_k_rate": 0.231,
+    "team_bb_rate": 0.088,
+    "team_era": 3.98,
+    "team_whip": 1.24,
+    "bullpen_era": 3.71,
+    "lineup_batters_available": 9,
+    "lineup_avg_woba": 0.327
+  },
+  "away_starter": {
+    "player_id": "gerrit-cole",
+    "team_id": "nyy",
+    "handedness": "R",
+    "season_ip": 182.1,
+    "season_era": 2.81,
+    "season_whip": 1.04,
+    "season_k_per_9": 10.8,
+    "season_bb_per_9": 2.2,
+    "season_hr_per_9": 0.8,
+    "recent_starts_n": 5,
+    "recent_era": 2.95,
+    "recent_k_per_9": 10.4,
+    "recent_ip_per_start": 6.2,
+    "vs_lhb_era": 2.94,
+    "vs_rhb_era": 2.67,
+    "days_rest": 5,
+    "last_start_pitches": 97
+  },
+  "home_starter": {
+    "player_id": "chris-sale",
+    "team_id": "bos",
+    "handedness": "L",
+    "season_ip": 168.0,
+    "season_era": 3.24,
+    "season_whip": 1.10,
+    "season_k_per_9": 11.2,
+    "season_bb_per_9": 2.4,
+    "season_hr_per_9": 0.9,
+    "recent_starts_n": 5,
+    "recent_era": 3.41,
+    "recent_k_per_9": 11.0,
+    "recent_ip_per_start": 5.8,
+    "vs_lhb_era": 2.88,
+    "vs_rhb_era": 3.52,
+    "days_rest": 5,
+    "last_start_pitches": 94
+  },
+  "away_batters": [
+    { "player_id": "nyy-1", "team_id": "nyy", "batting_order": 1, "handedness": "R", "season_pa": 610, "season_avg": 0.281, "season_obp": 0.364, "season_slg": 0.512, "season_woba": 0.371, "season_iso": 0.231, "season_k_rate": 0.221, "season_bb_rate": 0.107, "season_hr_rate": 0.062, "season_sb": 12, "recent_games_n": 10, "recent_woba": 0.352, "recent_avg": 0.273, "vs_lhp_woba": 0.381, "vs_rhp_woba": 0.366 },
+    { "player_id": "nyy-2", "team_id": "nyy", "batting_order": 2, "handedness": "L", "season_pa": 602, "season_avg": 0.296, "season_obp": 0.401, "season_slg": 0.545, "season_woba": 0.392, "season_iso": 0.249, "season_k_rate": 0.182, "season_bb_rate": 0.133, "season_hr_rate": 0.058, "season_sb": 9, "recent_games_n": 10, "recent_woba": 0.388, "recent_avg": 0.302, "vs_lhp_woba": 0.356, "vs_rhp_woba": 0.401 },
+    { "player_id": "nyy-3", "team_id": "nyy", "batting_order": 3, "handedness": "R", "season_pa": 580, "season_avg": 0.268, "season_obp": 0.349, "season_slg": 0.498, "season_woba": 0.357, "season_iso": 0.230, "season_k_rate": 0.242, "season_bb_rate": 0.095, "season_hr_rate": 0.055, "season_sb": 3, "recent_games_n": 10, "recent_woba": 0.341, "recent_avg": 0.261, "vs_lhp_woba": 0.364, "vs_rhp_woba": 0.353 },
+    { "player_id": "nyy-4", "team_id": "nyy", "batting_order": 4, "handedness": "L", "season_pa": 560, "season_avg": 0.272, "season_obp": 0.345, "season_slg": 0.472, "season_woba": 0.349, "season_iso": 0.200, "season_k_rate": 0.209, "season_bb_rate": 0.084, "season_hr_rate": 0.047, "season_sb": 1, "recent_games_n": 10, "recent_woba": 0.335, "recent_avg": 0.269, "vs_lhp_woba": 0.319, "vs_rhp_woba": 0.357 },
+    { "player_id": "nyy-5", "team_id": "nyy", "batting_order": 5, "handedness": "R", "season_pa": 540, "season_avg": 0.255, "season_obp": 0.334, "season_slg": 0.441, "season_woba": 0.332, "season_iso": 0.186, "season_k_rate": 0.231, "season_bb_rate": 0.092, "season_hr_rate": 0.039, "season_sb": 8, "recent_games_n": 10, "recent_woba": 0.319, "recent_avg": 0.251, "vs_lhp_woba": 0.341, "vs_rhp_woba": 0.327 },
+    { "player_id": "nyy-6", "team_id": "nyy", "batting_order": 6, "handedness": "R", "season_pa": 521, "season_avg": 0.248, "season_obp": 0.322, "season_slg": 0.417, "season_woba": 0.317, "season_iso": 0.169, "season_k_rate": 0.238, "season_bb_rate": 0.086, "season_hr_rate": 0.034, "season_sb": 15, "recent_games_n": 10, "recent_woba": 0.309, "recent_avg": 0.246, "vs_lhp_woba": 0.328, "vs_rhp_woba": 0.312 },
+    { "player_id": "nyy-7", "team_id": "nyy", "batting_order": 7, "handedness": "S", "season_pa": 493, "season_avg": 0.251, "season_obp": 0.326, "season_slg": 0.402, "season_woba": 0.314, "season_iso": 0.151, "season_k_rate": 0.224, "season_bb_rate": 0.083, "season_hr_rate": 0.028, "season_sb": 5, "recent_games_n": 10, "recent_woba": 0.302, "recent_avg": 0.245, "vs_lhp_woba": 0.323, "vs_rhp_woba": 0.311 },
+    { "player_id": "nyy-8", "team_id": "nyy", "batting_order": 8, "handedness": "L", "season_pa": 471, "season_avg": 0.242, "season_obp": 0.319, "season_slg": 0.389, "season_woba": 0.307, "season_iso": 0.147, "season_k_rate": 0.246, "season_bb_rate": 0.088, "season_hr_rate": 0.026, "season_sb": 2, "recent_games_n": 10, "recent_woba": 0.295, "recent_avg": 0.239, "vs_lhp_woba": 0.284, "vs_rhp_woba": 0.314 },
+    { "player_id": "nyy-9", "team_id": "nyy", "batting_order": 9, "handedness": "R", "season_pa": 450, "season_avg": 0.237, "season_obp": 0.309, "season_slg": 0.378, "season_woba": 0.298, "season_iso": 0.141, "season_k_rate": 0.251, "season_bb_rate": 0.081, "season_hr_rate": 0.022, "season_sb": 10, "recent_games_n": 10, "recent_woba": 0.289, "recent_avg": 0.233, "vs_lhp_woba": 0.307, "vs_rhp_woba": 0.294 }
+  ],
+  "home_batters": [
+    { "player_id": "bos-1", "team_id": "bos", "batting_order": 1, "handedness": "L", "season_pa": 615, "season_avg": 0.287, "season_obp": 0.354, "season_slg": 0.471, "season_woba": 0.351, "season_iso": 0.184, "season_k_rate": 0.205, "season_bb_rate": 0.083, "season_hr_rate": 0.036, "season_sb": 21, "recent_games_n": 10, "recent_woba": 0.345, "recent_avg": 0.282, "vs_lhp_woba": 0.332, "vs_rhp_woba": 0.359 },
+    { "player_id": "bos-2", "team_id": "bos", "batting_order": 2, "handedness": "L", "season_pa": 604, "season_avg": 0.291, "season_obp": 0.372, "season_slg": 0.523, "season_woba": 0.381, "season_iso": 0.232, "season_k_rate": 0.188, "season_bb_rate": 0.108, "season_hr_rate": 0.054, "season_sb": 6, "recent_games_n": 10, "recent_woba": 0.376, "recent_avg": 0.288, "vs_lhp_woba": 0.361, "vs_rhp_woba": 0.389 },
+    { "player_id": "bos-3", "team_id": "bos", "batting_order": 3, "handedness": "L", "season_pa": 571, "season_avg": 0.274, "season_obp": 0.349, "season_slg": 0.462, "season_woba": 0.347, "season_iso": 0.188, "season_k_rate": 0.196, "season_bb_rate": 0.094, "season_hr_rate": 0.038, "season_sb": 8, "recent_games_n": 10, "recent_woba": 0.338, "recent_avg": 0.269, "vs_lhp_woba": 0.321, "vs_rhp_woba": 0.356 },
+    { "player_id": "bos-4", "team_id": "bos", "batting_order": 4, "handedness": "R", "season_pa": 553, "season_avg": 0.261, "season_obp": 0.336, "season_slg": 0.448, "season_woba": 0.334, "season_iso": 0.187, "season_k_rate": 0.229, "season_bb_rate": 0.091, "season_hr_rate": 0.041, "season_sb": 1, "recent_games_n": 10, "recent_woba": 0.329, "recent_avg": 0.257, "vs_lhp_woba": 0.338, "vs_rhp_woba": 0.332 },
+    { "player_id": "bos-5", "team_id": "bos", "batting_order": 5, "handedness": "L", "season_pa": 538, "season_avg": 0.268, "season_obp": 0.341, "season_slg": 0.456, "season_woba": 0.339, "season_iso": 0.188, "season_k_rate": 0.214, "season_bb_rate": 0.089, "season_hr_rate": 0.043, "season_sb": 2, "recent_games_n": 10, "recent_woba": 0.333, "recent_avg": 0.264, "vs_lhp_woba": 0.312, "vs_rhp_woba": 0.347 },
+    { "player_id": "bos-6", "team_id": "bos", "batting_order": 6, "handedness": "R", "season_pa": 516, "season_avg": 0.249, "season_obp": 0.325, "season_slg": 0.421, "season_woba": 0.321, "season_iso": 0.172, "season_k_rate": 0.247, "season_bb_rate": 0.091, "season_hr_rate": 0.032, "season_sb": 11, "recent_games_n": 10, "recent_woba": 0.316, "recent_avg": 0.246, "vs_lhp_woba": 0.329, "vs_rhp_woba": 0.317 },
+    { "player_id": "bos-7", "team_id": "bos", "batting_order": 7, "handedness": "R", "season_pa": 488, "season_avg": 0.244, "season_obp": 0.317, "season_slg": 0.397, "season_woba": 0.307, "season_iso": 0.153, "season_k_rate": 0.253, "season_bb_rate": 0.084, "season_hr_rate": 0.026, "season_sb": 4, "recent_games_n": 10, "recent_woba": 0.301, "recent_avg": 0.239, "vs_lhp_woba": 0.318, "vs_rhp_woba": 0.303 },
+    { "player_id": "bos-8", "team_id": "bos", "batting_order": 8, "handedness": "L", "season_pa": 462, "season_avg": 0.236, "season_obp": 0.308, "season_slg": 0.382, "season_woba": 0.296, "season_iso": 0.146, "season_k_rate": 0.258, "season_bb_rate": 0.079, "season_hr_rate": 0.023, "season_sb": 0, "recent_games_n": 10, "recent_woba": 0.291, "recent_avg": 0.231, "vs_lhp_woba": 0.271, "vs_rhp_woba": 0.304 },
+    { "player_id": "bos-9", "team_id": "bos", "batting_order": 9, "handedness": "R", "season_pa": 441, "season_avg": 0.239, "season_obp": 0.311, "season_slg": 0.388, "season_woba": 0.301, "season_iso": 0.149, "season_k_rate": 0.248, "season_bb_rate": 0.083, "season_hr_rate": 0.021, "season_sb": 7, "recent_games_n": 10, "recent_woba": 0.297, "recent_avg": 0.235, "vs_lhp_woba": 0.309, "vs_rhp_woba": 0.297 }
+  ],
+  "blocked": {
+    "is_blocked": false,
+    "blocked_reason": null
+  },
+  "has_both_starters": true,
+  "has_both_lineups": true,
+  "completeness_score": 0.95
+}
