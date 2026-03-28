@@ -1,7 +1,11 @@
-import { describe, expect, it } from "vitest";
-import prepared from "../../data/fixtures/sample-prepared-game.json";
-import invalidPrepared from "../../data/fixtures/sample-prepared-game-invalid.json";
+﻿import { describe, expect, it } from "vitest";
+import preparedFixture from "../../data/fixtures/sample-prepared-game.json";
+import invalidPreparedFixture from "../../data/fixtures/sample-prepared-game-invalid.json";
+import type { PreparedGameInputs } from "@lib/contracts/prepared";
 import { runAllPreparedGameChecks, shouldBlockGame } from "@lib/checks";
+
+const prepared = preparedFixture as unknown as PreparedGameInputs;
+const invalidPrepared = invalidPreparedFixture as unknown as PreparedGameInputs;
 
 describe("pipeline invariants", () => {
   it("is deterministic for identical inputs", () => {

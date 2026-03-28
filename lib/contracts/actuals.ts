@@ -1,4 +1,4 @@
-import type { GameId, ISOTimestamp, PlayerId, SourceMetadata, TeamId } from "./types";
+﻿import type { GameId, ISOTimestamp, PlayerId, SourceMetadata, TeamId } from "./types";
 
 export interface ActualTeamOutcome {
   readonly team_id: TeamId;
@@ -34,6 +34,16 @@ export interface ActualPlayerOutcome {
   readonly rbi: number | null;
   readonly walks: number | null;
   readonly stolen_bases: number | null;
+  readonly singles: number | null;
+  readonly doubles: number | null;
+  readonly triples: number | null;
+  readonly home_runs: number | null;
+  readonly hbp: number | null;
+  readonly caught_stealing: number | null;
+  readonly win: boolean | null;
+  readonly complete_game: boolean | null;
+  readonly shutout: boolean | null;
+  readonly no_hitter: boolean | null;
 }
 
 export interface ActualFantasyOutcome {

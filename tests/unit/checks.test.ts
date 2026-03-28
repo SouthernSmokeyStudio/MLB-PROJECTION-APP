@@ -1,8 +1,14 @@
-import { describe, expect, it } from "vitest";
-import normalized from "../../data/fixtures/sample-normalized-game.json";
-import prepared from "../../data/fixtures/sample-prepared-game.json";
-import invalidPrepared from "../../data/fixtures/sample-prepared-game-invalid.json";
+﻿import { describe, expect, it } from "vitest";
+import normalizedFixture from "../../data/fixtures/sample-normalized-game.json";
+import preparedFixture from "../../data/fixtures/sample-prepared-game.json";
+import invalidPreparedFixture from "../../data/fixtures/sample-prepared-game-invalid.json";
+import type { CanonicalGame } from "@lib/contracts/canonical";
+import type { PreparedGameInputs } from "@lib/contracts/prepared";
 import { runAllCanonicalGameChecks, runAllPreparedGameChecks, shouldBlockGame } from "@lib/checks";
+
+const normalized = normalizedFixture as unknown as CanonicalGame;
+const prepared = preparedFixture as unknown as PreparedGameInputs;
+const invalidPrepared = invalidPreparedFixture as unknown as PreparedGameInputs;
 
 describe("checks", () => {
   it("passes a valid canonical game", () => {
