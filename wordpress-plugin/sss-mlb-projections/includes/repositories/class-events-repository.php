@@ -30,11 +30,21 @@ final class SSS_MLB_Events_Repository extends SSS_MLB_Base_Repository {
         ));
 
         if ($existing_id > 0) {
-            $this->wpdb->update($table, $event, ['id' => $existing_id]);
+            $result = $this->wpdb->update($table, $event, ['id' => $existing_id]);
+
+            if ($result === false) {
+                throw new RuntimeException('Failed to update validation demo event: ' . $this->wpdb->last_error);
+            }
+
             return $existing_id;
         }
 
-        $this->wpdb->insert($table, $event);
+        $result = $this->wpdb->insert($table, $event);
+
+        if ($result === false || (int) $this->wpdb->insert_id <= 0) {
+            throw new RuntimeException('Failed to insert validation demo event: ' . $this->wpdb->last_error);
+        }
+
         return (int) $this->wpdb->insert_id;
     }
 }

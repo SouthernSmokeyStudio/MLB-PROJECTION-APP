@@ -16,11 +16,7 @@ final class SSS_MLB_REST_Controller_Projections {
 
     public function get_slate(WP_REST_Request $request): WP_REST_Response {
         $date = (string) $request['date'];
-        $rows = $this->projections->get_published_slate($date);
-        return new WP_REST_Response([
-            'date' => $date,
-            'count' => count($rows),
-            'rows' => $rows,
-        ], 200);
+        $slate = $this->projections->get_publish_safe_slate($date);
+        return new WP_REST_Response($slate, 200);
     }
 }

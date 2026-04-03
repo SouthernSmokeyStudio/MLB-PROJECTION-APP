@@ -4,11 +4,23 @@ if (!defined('ABSPATH')) {
 }
 
 final class SSS_MLB_Schema_Manager {
-    public function install_or_upgrade(): void {
+    private const PHASE1_COVERAGE_VALID_FROM = '2026-03-29 00:00:00';
+
+    public function install_or_upgrade(): array {
         global $wpdb;
 
         require_once ABSPATH . 'wp-admin/includes/upgrade.php';
         $collate = $wpdb->get_charset_collate();
+        $now = current_time('mysql', true);
+        $previous_plugin_version = (string) get_option('sss_mlb_plugin_version', '');
+        $previous_schema_version = (string) get_option('sss_mlb_schema_version', '');
+
+        $action = 'noop';
+        if ($previous_schema_version === '') {
+            $action = 'install';
+        } elseif ($previous_schema_version !== SSS_MLB_SCHEMA_VERSION || $previous_plugin_version !== SSS_MLB_PLUGIN_VERSION) {
+            $action = 'upgrade';
+        }
 
         foreach ($this->get_table_sql($collate) as $sql) {
             dbDelta($sql);
@@ -19,6 +31,16 @@ final class SSS_MLB_Schema_Manager {
         update_option('sss_mlb_active_formula_bundle', SSS_MLB_ACTIVE_FORMULA_BUNDLE);
 
         $this->seed_reference_rows();
+
+        return [
+            'action' => $action,
+            'status' => 'completed',
+            'ran_at_utc' => $now,
+            'plugin_version' => SSS_MLB_PLUGIN_VERSION,
+            'schema_version' => SSS_MLB_SCHEMA_VERSION,
+            'previous_plugin_version' => $previous_plugin_version === '' ? null : $previous_plugin_version,
+            'previous_schema_version' => $previous_schema_version === '' ? null : $previous_schema_version,
+        ];
     }
 
     public function table(string $suffix): string {
@@ -522,6 +544,40 @@ final class SSS_MLB_Schema_Manager {
             'updated_at'          => $now,
         ]);
 
+        $league_id = (int) $wpdb->get_var($wpdb->prepare(
+            "SELECT id FROM {$this->table('leagues')} WHERE league_key = %s",
+            'mlb'
+        ));
+
+        $team_rows = [
+            [
+                'team_key' => 'mlb_nyy_validation_seed',
+                'team_name' => 'New York Yankees',
+                'team_abbr' => 'NYY',
+                'city_name' => 'New York',
+            ],
+            [
+                'team_key' => 'mlb_bos_validation_seed',
+                'team_name' => 'Boston Red Sox',
+                'team_abbr' => 'BOS',
+                'city_name' => 'Boston',
+            ],
+        ];
+
+        foreach ($team_rows as $team_row) {
+            $wpdb->replace($this->table('teams'), [
+                'league_id' => $league_id,
+                'team_key' => $team_row['team_key'],
+                'team_name' => $team_row['team_name'],
+                'team_abbr' => $team_row['team_abbr'],
+                'city_name' => $team_row['city_name'],
+                'valid_from' => '2026-01-01',
+                'valid_to' => null,
+                'created_at' => $now,
+                'updated_at' => $now,
+            ]);
+        }
+
         $settlement_rows = [
             [
                 'settlement_rule_key' => 'mlb_moneyline_full_game',
@@ -669,6 +725,8 @@ final class SSS_MLB_Schema_Manager {
             ]);
         }
 
+        $this->seed_formula_market_coverage($now);
+
         $wpdb->replace($this->table('release_rules'), [
             'rule_key' => 'phase1_release_v1',
             'rule_name' => 'Phase 1 Release Rules',
@@ -682,5 +740,72 @@ final class SSS_MLB_Schema_Manager {
             'is_active' => 1,
             'created_at' => $now,
         ]);
+    }
+
+    private function seed_formula_market_coverage(string $created_at): void {
+        global $wpdb;
+
+        $coverage_rows = [
+            ['F001_v1', 'mlb_game_moneyline_full_game', 'publish'],
+            ['F002_v1', 'mlb_game_run_line_full_game', 'publish'],
+            ['F003_v1', 'mlb_game_total_full_game', 'publish'],
+            ['F004_v1', 'mlb_team_total_full_game', 'publish'],
+        ];
+
+        foreach ($coverage_rows as $coverage_row) {
+            $formula_version_id = (int) $wpdb->get_var($wpdb->prepare(
+                "SELECT id FROM {$this->table('formula_versions')} WHERE version_key = %s",
+                $coverage_row[0]
+            ));
+            $market_type_id = (int) $wpdb->get_var($wpdb->prepare(
+                "SELECT id FROM {$this->table('market_types')} WHERE market_type_key = %s",
+                $coverage_row[1]
+            ));
+
+            if ($formula_version_id <= 0) {
+                throw new RuntimeException('Missing formula_version for coverage seed: ' . $coverage_row[0]);
+            }
+
+            if ($market_type_id <= 0) {
+                throw new RuntimeException('Missing market_type for coverage seed: ' . $coverage_row[1]);
+            }
+
+            $existing_id = (int) $wpdb->get_var($wpdb->prepare(
+                "SELECT id
+                 FROM {$this->table('formula_market_coverage')}
+                 WHERE formula_version_id = %d
+                   AND market_type_id = %d
+                   AND coverage_role = %s
+                 ORDER BY id ASC
+                 LIMIT 1",
+                $formula_version_id,
+                $market_type_id,
+                $coverage_row[2]
+            ));
+
+            $payload = [
+                'formula_version_id' => $formula_version_id,
+                'market_type_id' => $market_type_id,
+                'coverage_role' => $coverage_row[2],
+                'support_status' => 'approved',
+                'valid_from_utc' => self::PHASE1_COVERAGE_VALID_FROM,
+                'valid_to_utc' => null,
+                'notes' => 'Phase 1 approved market coverage',
+                'created_at' => $created_at,
+            ];
+
+            if ($existing_id > 0) {
+                $result = $wpdb->update($this->table('formula_market_coverage'), $payload, ['id' => $existing_id]);
+                if ($result === false) {
+                    throw new RuntimeException('Failed to update formula_market_coverage row: ' . $wpdb->last_error);
+                }
+                continue;
+            }
+
+            $result = $wpdb->insert($this->table('formula_market_coverage'), $payload, ['%d', '%d', '%s', '%s', '%s', '%s', '%s', '%s']);
+            if ($result === false) {
+                throw new RuntimeException('Failed to insert formula_market_coverage row: ' . $wpdb->last_error);
+            }
+        }
     }
 }

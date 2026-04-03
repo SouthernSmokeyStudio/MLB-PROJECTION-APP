@@ -58,4 +58,17 @@ final class SSS_MLB_Feature_Builder {
             'matchup_length_penalty' => 0.08,
         ];
     }
+
+    public function build_opportunity_features_from_prepared_input(array $prepared_input): array {
+        $feature_vector = json_decode((string) ($prepared_input['feature_vector'] ?? ''), true);
+        $features = is_array($feature_vector) ? $feature_vector : [];
+
+        $features['event_id'] = (int) ($prepared_input['event_id'] ?? 0);
+        $features['player_id'] = (int) ($prepared_input['subject_id'] ?? 0);
+        $features['prepared_input_id'] = (int) ($prepared_input['id'] ?? 0);
+        $features['validation_status'] = $prepared_input['validation_status'] ?? 'invalid';
+        $features['blocked_reason'] = $prepared_input['blocked_reason'] ?? null;
+
+        return $features;
+    }
 }

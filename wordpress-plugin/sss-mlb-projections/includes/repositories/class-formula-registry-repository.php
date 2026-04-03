@@ -29,4 +29,8 @@ final class SSS_MLB_Formula_Registry_Repository extends SSS_MLB_Base_Repository 
         );
         return is_array($row) ? $row : null;
     }
+
+    public function formula_version_is_approved(?array $version): bool {
+        return is_array($version) && ($version['status'] ?? null) === 'approved' && !empty($version['id']);
+    }
 }

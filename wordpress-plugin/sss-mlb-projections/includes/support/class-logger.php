@@ -4,7 +4,14 @@ if (!defined('ABSPATH')) {
 }
 
 final class SSS_MLB_Logger {
+    public function __construct(private ?SSS_MLB_Run_Logs_Repository $logs = null) {}
+
     public function log(string $level, string $context_key, string $message, array $details = []): void {
+        if ($this->logs) {
+            $this->logs->insert($level, $context_key, $message, $details);
+            return;
+        }
+
         global $wpdb;
         $table = $wpdb->prefix . 'sss_mlb_run_logs';
         $wpdb->insert($table, [

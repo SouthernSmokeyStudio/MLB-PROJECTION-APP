@@ -4,6 +4,8 @@
  * Description: Southern Smokey Studio MLB Phase 1 projection engine shell.
  * Version: 0.1.0
  * Author: Southern Smokey Studio
+ * Requires at least: 6.0
+ * Requires PHP: 8.0
  */
 
 if (!defined('ABSPATH')) {
