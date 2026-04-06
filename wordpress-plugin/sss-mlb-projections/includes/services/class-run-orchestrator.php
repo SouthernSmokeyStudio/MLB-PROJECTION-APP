@@ -38,11 +38,14 @@ final class SSS_MLB_Run_Orchestrator {
         }
 
         try {
-            $seeded = $this->seed_validation_event_market_and_input();
-            $this->logger->info($job_key, 'Phase 1 internal validation ingest seed completed.', $seeded);
-            return $seeded;
+            $seeded = $this->seed_or_build_event_market_and_input();
+            $this->logger->info($job_key, 'Phase 1 ingest lane completed.', $seeded);
+            return array_merge([
+                'status' => 'success',
+                'market_instance_count' => !empty($seeded['market_instance_id']) ? 1 : 0,
+            ], $seeded);
         } catch (Throwable $throwable) {
-            $this->logger->error($job_key, 'Phase 1 internal validation ingest seed failed.', [
+            $this->logger->error($job_key, 'Phase 1 ingest lane failed.', [
                 'error' => $throwable->getMessage(),
             ]);
             throw $throwable;
@@ -98,11 +101,15 @@ final class SSS_MLB_Run_Orchestrator {
 
     private function run_event_projection_pipeline(array $event, string $batch_key): array {
         $context_key = 'phase1_event_' . (int) $event['id'];
+        $game_input_context = $this->resolve_game_input_context($event);
         $features = $this->feature_builder->build_game_features($event);
         $entity_mapping_status = $this->event_entity_mapping_status($event);
         $starter_confirmed = ($features['starter_confirmed_home'] ?? false) && ($features['starter_confirmed_away'] ?? false);
         $stale_minutes = $this->minutes_since($event['updated_at'] ?? null);
-        $required_inputs_complete = !empty($event['scheduled_start_utc']) && !empty($event['home_team_id']) && !empty($event['away_team_id']);
+        $required_inputs_complete = !empty($event['scheduled_start_utc'])
+            && !empty($event['home_team_id'])
+            && !empty($event['away_team_id'])
+            && ($game_input_context['release_ready'] ?? false);
 
         $f001_version = $this->formula_registry->get_approved_version('F001');
         if (!$this->formula_registry->formula_version_is_approved($f001_version)) {
@@ -152,6 +159,7 @@ final class SSS_MLB_Run_Orchestrator {
                 'distribution_payload' => null,
                 'fair_line' => null,
                 'market_type_key' => null,
+                'prepared_input_id' => $game_input_context['prepared_input_id'],
                 'parent_distribution_ready' => true,
             ], array_merge($base_release, [
                 'formula_version_key' => $f001_version['version_key'],
@@ -160,13 +168,15 @@ final class SSS_MLB_Run_Orchestrator {
                 'home_field_effect' => $features['home_field_effect'] ?? null,
                 'home_offense' => $features['home_offense'] ?? null,
                 'away_offense' => $features['away_offense'] ?? null,
+                'source_lane' => $game_input_context['source_lane'],
+                'prepared_input_id' => $game_input_context['prepared_input_id'],
             ]);
             $projection_count += $artifact_counts['projection_count'];
             $release_audit_count += $artifact_counts['release_audit_count'];
             $game_projection_attempts++;
         }
 
-        $market_projection_summary = $this->persist_market_projections($event, $batch_key, $base_release, $f001, $f001_version);
+        $market_projection_summary = $this->persist_market_projections($event, $batch_key, $base_release, $f001, $f001_version, $game_input_context);
         $game_projection_attempts += $market_projection_summary['attempt_count'];
         $projection_count += $market_projection_summary['projection_count'];
         $release_audit_count += $market_projection_summary['release_audit_count'];
@@ -191,7 +201,7 @@ final class SSS_MLB_Run_Orchestrator {
         ];
     }
 
-    private function persist_market_projections(array $event, string $batch_key, array $base_release, array $f001, array $f001_version): array {
+    private function persist_market_projections(array $event, string $batch_key, array $base_release, array $f001, array $f001_version, array $game_input_context): array {
         $summary = [
             'attempt_count' => 0,
             'projection_count' => 0,
@@ -210,29 +220,32 @@ final class SSS_MLB_Run_Orchestrator {
                 'distribution_payload' => null,
                 'fair_line' => null,
                 'market_type_key' => 'mlb_game_moneyline_full_game',
+                'prepared_input_id' => $game_input_context['prepared_input_id'],
                 'parent_distribution_ready' => true,
             ], array_merge($base_release, [
                 'formula_version_key' => $f001_version['version_key'],
                 'formula_version_approved' => true,
             ]), [
                 'market_family' => 'moneyline',
+                'source_lane' => $game_input_context['source_lane'],
+                'prepared_input_id' => $game_input_context['prepared_input_id'],
             ]);
             $summary['attempt_count']++;
             $summary['projection_count'] += $artifact_counts['projection_count'];
             $summary['release_audit_count'] += $artifact_counts['release_audit_count'];
         }
 
-        $f002_summary = $this->persist_f002_rows($event, $batch_key, $base_release, $f001);
+        $f002_summary = $this->persist_f002_rows($event, $batch_key, $base_release, $f001, $game_input_context);
         $summary['attempt_count'] += $f002_summary['attempt_count'];
         $summary['projection_count'] += $f002_summary['projection_count'];
         $summary['release_audit_count'] += $f002_summary['release_audit_count'];
 
-        $f003_summary = $this->persist_f003_rows($event, $batch_key, $base_release, $f001);
+        $f003_summary = $this->persist_f003_rows($event, $batch_key, $base_release, $f001, $game_input_context);
         $summary['attempt_count'] += $f003_summary['attempt_count'];
         $summary['projection_count'] += $f003_summary['projection_count'];
         $summary['release_audit_count'] += $f003_summary['release_audit_count'];
 
-        $f004_summary = $this->persist_f004_rows($event, $batch_key, $base_release, $f001);
+        $f004_summary = $this->persist_f004_rows($event, $batch_key, $base_release, $f001, $game_input_context);
         $summary['attempt_count'] += $f004_summary['attempt_count'];
         $summary['projection_count'] += $f004_summary['projection_count'];
         $summary['release_audit_count'] += $f004_summary['release_audit_count'];
@@ -240,7 +253,7 @@ final class SSS_MLB_Run_Orchestrator {
         return $summary;
     }
 
-    private function persist_f002_rows(array $event, string $batch_key, array $base_release, array $f001): array {
+    private function persist_f002_rows(array $event, string $batch_key, array $base_release, array $f001, array $game_input_context): array {
         $version = $this->formula_registry->get_approved_version('F002');
         if (!$this->formula_registry->formula_version_is_approved($version)) {
             return ['attempt_count' => 0, 'projection_count' => 0, 'release_audit_count' => 0];
@@ -265,12 +278,15 @@ final class SSS_MLB_Run_Orchestrator {
                 'distribution_payload' => wp_json_encode($result['distribution_payload']),
                 'fair_line' => $row[2],
                 'market_type_key' => 'mlb_game_run_line_full_game',
+                'prepared_input_id' => $game_input_context['prepared_input_id'],
                 'parent_distribution_ready' => true,
             ], array_merge($base_release, [
                 'formula_version_key' => $version['version_key'],
                 'formula_version_approved' => true,
             ]), [
                 'distribution_type' => 'run_margin',
+                'source_lane' => $game_input_context['source_lane'],
+                'prepared_input_id' => $game_input_context['prepared_input_id'],
             ]);
             $summary['attempt_count']++;
             $summary['projection_count'] += $artifact_counts['projection_count'];
@@ -280,7 +296,7 @@ final class SSS_MLB_Run_Orchestrator {
         return $summary;
     }
 
-    private function persist_f003_rows(array $event, string $batch_key, array $base_release, array $f001): array {
+    private function persist_f003_rows(array $event, string $batch_key, array $base_release, array $f001, array $game_input_context): array {
         $version = $this->formula_registry->get_approved_version('F003');
         if (!$this->formula_registry->formula_version_is_approved($version)) {
             return ['attempt_count' => 0, 'projection_count' => 0, 'release_audit_count' => 0];
@@ -305,12 +321,15 @@ final class SSS_MLB_Run_Orchestrator {
                 'distribution_payload' => wp_json_encode($result['distribution_payload']),
                 'fair_line' => $row[2],
                 'market_type_key' => 'mlb_game_total_full_game',
+                'prepared_input_id' => $game_input_context['prepared_input_id'],
                 'parent_distribution_ready' => true,
             ], array_merge($base_release, [
                 'formula_version_key' => $version['version_key'],
                 'formula_version_approved' => true,
             ]), [
                 'distribution_type' => 'total_runs',
+                'source_lane' => $game_input_context['source_lane'],
+                'prepared_input_id' => $game_input_context['prepared_input_id'],
             ]);
             $summary['attempt_count']++;
             $summary['projection_count'] += $artifact_counts['projection_count'];
@@ -320,7 +339,7 @@ final class SSS_MLB_Run_Orchestrator {
         return $summary;
     }
 
-    private function persist_f004_rows(array $event, string $batch_key, array $base_release, array $f001): array {
+    private function persist_f004_rows(array $event, string $batch_key, array $base_release, array $f001, array $game_input_context): array {
         $version = $this->formula_registry->get_approved_version('F004');
         if (!$this->formula_registry->formula_version_is_approved($version)) {
             return ['attempt_count' => 0, 'projection_count' => 0, 'release_audit_count' => 0];
@@ -347,12 +366,15 @@ final class SSS_MLB_Run_Orchestrator {
                 'distribution_payload' => null,
                 'fair_line' => $row[3],
                 'market_type_key' => 'mlb_team_total_full_game',
+                'prepared_input_id' => $game_input_context['prepared_input_id'],
                 'parent_distribution_ready' => true,
             ], array_merge($base_release, [
                 'formula_version_key' => $version['version_key'],
                 'formula_version_approved' => true,
             ]), [
                 'distribution_type' => 'team_total',
+                'source_lane' => $game_input_context['source_lane'],
+                'prepared_input_id' => $game_input_context['prepared_input_id'],
             ]);
             $summary['attempt_count']++;
             $summary['projection_count'] += $artifact_counts['projection_count'];
@@ -612,6 +634,130 @@ final class SSS_MLB_Run_Orchestrator {
         }
 
         return 'mapped';
+    }
+
+    private function find_first_real_upcoming_event(): ?array {
+        return $this->events->get_first_real_upcoming_event(25);
+    }
+
+    private function should_use_real_event_path(array $event): bool {
+        return !empty($event['id'])
+            && !empty($event['scheduled_start_utc'])
+            && !empty($event['home_team_id'])
+            && !empty($event['away_team_id'])
+            && (($event['event_key'] ?? '') !== 'validation_demo_phase1a_event');
+    }
+
+    private function build_real_game_feature_vector(array $event): array {
+        $neutral_site = !empty($event['neutral_site']);
+
+        return [
+            'event_id' => (int) $event['id'],
+            'home_team_id' => (int) $event['home_team_id'],
+            'away_team_id' => (int) $event['away_team_id'],
+            'scheduled_start_utc' => (string) ($event['scheduled_start_utc'] ?? ''),
+            'home_offense' => 1.00,
+            'away_offense' => 1.00,
+            'home_starter_quality' => 0.00,
+            'away_starter_quality' => 0.00,
+            'home_bullpen_quality' => 0.00,
+            'away_bullpen_quality' => 0.00,
+            'park_run_factor' => 1.00,
+            'weather_factor' => 1.00,
+            'home_field_effect' => $neutral_site ? 0.00 : 0.05,
+            'volatility_factor' => 0.03,
+            'lineup_confirmed_home' => false,
+            'lineup_confirmed_away' => false,
+            'starter_confirmed_home' => false,
+            'starter_confirmed_away' => false,
+            'source_lane' => 'real_event_scaffold',
+            'lineage_mode' => 'real_event_safe_fields_only',
+            'lineage_note' => 'Real-event scaffold built from event table fields only. No provider enrichments applied.',
+        ];
+    }
+
+    private function upsert_real_game_prepared_input(array $event, ?int $market_instance_id, array $feature_vector): int {
+        $event_id = (int) ($event['id'] ?? 0);
+
+        if ($event_id <= 0) {
+            throw new RuntimeException('Real-event scaffold requires a valid event id.');
+        }
+
+        if (($event['event_key'] ?? '') === 'validation_demo_phase1a_event') {
+            throw new RuntimeException('Real-event scaffold cannot persist prepared input for validation demo event key.');
+        }
+
+        $feature_set_id = $this->prepared_inputs->get_feature_set_id('phase1_game_environment');
+
+        if ($feature_set_id <= 0) {
+            throw new RuntimeException('Missing phase1_game_environment feature set for real-event scaffold.');
+        }
+
+        return $this->prepared_inputs->upsert_game_environment_input([
+            'prepared_input_key' => 'real_event_scaffold_game_environment_' . $event_id,
+            'event_id' => $event_id,
+            'subject_type' => 'event',
+            'subject_id' => $event_id,
+            'feature_set_id' => $feature_set_id,
+            'prepared_at_utc' => current_time('mysql', true),
+            'validation_status' => 'scaffold_only',
+            'blocked_reason' => 'real_event_scaffold_no_provider_enrichments',
+            'source_snapshot_refs' => wp_json_encode([
+                'source_lane' => 'real_event_scaffold',
+                'lineage_mode' => 'real_event_safe_fields_only',
+                'readiness' => 'not_production_ready',
+                'market_instance_id' => $market_instance_id,
+            ]),
+            'feature_vector' => wp_json_encode($feature_vector),
+            'created_at' => current_time('mysql', true),
+        ]);
+    }
+
+    private function seed_or_build_event_market_and_input(): array {
+        $event = $this->find_first_real_upcoming_event();
+
+        if ($event && $this->should_use_real_event_path($event)) {
+            $event_markets = $this->markets->get_event_markets((int) $event['id']);
+            $market_instance_id = !empty($event_markets[0]['id']) ? (int) $event_markets[0]['id'] : null;
+            $feature_vector = $this->build_real_game_feature_vector($event);
+            $prepared_input_id = $this->upsert_real_game_prepared_input($event, $market_instance_id, $feature_vector);
+
+            return [
+                'source_lane' => 'real_event_scaffold',
+                'event_id' => (int) $event['id'],
+                'prepared_input_id' => $prepared_input_id,
+                'market_instance_id' => $market_instance_id,
+            ];
+        }
+
+        $seeded = $this->seed_validation_event_market_and_input();
+        return [
+            'source_lane' => 'validation_demo',
+            'event_id' => $seeded['event_id'],
+            'prepared_input_id' => $seeded['prepared_input_id'],
+            'market_instance_id' => $seeded['market_instance_id'] ?? null,
+        ];
+    }
+
+    private function resolve_game_input_context(array $event): array {
+        if ($this->should_use_real_event_path($event)) {
+            $event_markets = $this->markets->get_event_markets((int) $event['id']);
+            $market_instance_id = !empty($event_markets[0]['id']) ? (int) $event_markets[0]['id'] : null;
+            $feature_vector = $this->build_real_game_feature_vector($event);
+            $prepared_input_id = $this->upsert_real_game_prepared_input($event, $market_instance_id, $feature_vector);
+
+            return [
+                'source_lane' => 'real_event_scaffold',
+                'prepared_input_id' => $prepared_input_id,
+                'release_ready' => false,
+            ];
+        }
+
+        return [
+            'source_lane' => 'validation_demo',
+            'prepared_input_id' => null,
+            'release_ready' => true,
+        ];
     }
 
     private function seed_validation_event_market_and_input(): array {

@@ -26,11 +26,200 @@ import {
 } from "./contracts";
 
 const TEAM_METADATA: Record<number, Omit<CanonicalTeam, "team_id" | "sport_id"> & { team_id_raw: string }> = {
+  108: {
+    team_id_raw: "laa",
+    abbreviation: "LAA",
+    full_name: "Los Angeles Angels",
+    league: "AL",
+    division: "West"
+  },
+  109: {
+    team_id_raw: "ari",
+    abbreviation: "ARI",
+    full_name: "Arizona Diamondbacks",
+    league: "NL",
+    division: "West"
+  },
+  110: {
+    team_id_raw: "bal",
+    abbreviation: "BAL",
+    full_name: "Baltimore Orioles",
+    league: "AL",
+    division: "East"
+  },
   111: {
     team_id_raw: "bos",
     abbreviation: "BOS",
     full_name: "Boston Red Sox",
     league: "AL",
+    division: "East"
+  },
+  112: {
+    team_id_raw: "chc",
+    abbreviation: "CHC",
+    full_name: "Chicago Cubs",
+    league: "NL",
+    division: "Central"
+  },
+  113: {
+    team_id_raw: "cin",
+    abbreviation: "CIN",
+    full_name: "Cincinnati Reds",
+    league: "NL",
+    division: "Central"
+  },
+  114: {
+    team_id_raw: "cle",
+    abbreviation: "CLE",
+    full_name: "Cleveland Guardians",
+    league: "AL",
+    division: "Central"
+  },
+  115: {
+    team_id_raw: "col",
+    abbreviation: "COL",
+    full_name: "Colorado Rockies",
+    league: "NL",
+    division: "West"
+  },
+  116: {
+    team_id_raw: "det",
+    abbreviation: "DET",
+    full_name: "Detroit Tigers",
+    league: "AL",
+    division: "Central"
+  },
+  117: {
+    team_id_raw: "hou",
+    abbreviation: "HOU",
+    full_name: "Houston Astros",
+    league: "AL",
+    division: "West"
+  },
+  118: {
+    team_id_raw: "kc",
+    abbreviation: "KC",
+    full_name: "Kansas City Royals",
+    league: "AL",
+    division: "Central"
+  },
+  119: {
+    team_id_raw: "lad",
+    abbreviation: "LAD",
+    full_name: "Los Angeles Dodgers",
+    league: "NL",
+    division: "West"
+  },
+  120: {
+    team_id_raw: "wsh",
+    abbreviation: "WSH",
+    full_name: "Washington Nationals",
+    league: "NL",
+    division: "East"
+  },
+  121: {
+    team_id_raw: "nym",
+    abbreviation: "NYM",
+    full_name: "New York Mets",
+    league: "NL",
+    division: "East"
+  },
+  133: {
+    team_id_raw: "ath",
+    abbreviation: "ATH",
+    full_name: "Athletics",
+    league: "AL",
+    division: "West"
+  },
+  134: {
+    team_id_raw: "pit",
+    abbreviation: "PIT",
+    full_name: "Pittsburgh Pirates",
+    league: "NL",
+    division: "Central"
+  },
+  135: {
+    team_id_raw: "sd",
+    abbreviation: "SD",
+    full_name: "San Diego Padres",
+    league: "NL",
+    division: "West"
+  },
+  136: {
+    team_id_raw: "sea",
+    abbreviation: "SEA",
+    full_name: "Seattle Mariners",
+    league: "AL",
+    division: "West"
+  },
+  137: {
+    team_id_raw: "sf",
+    abbreviation: "SF",
+    full_name: "San Francisco Giants",
+    league: "NL",
+    division: "West"
+  },
+  138: {
+    team_id_raw: "stl",
+    abbreviation: "STL",
+    full_name: "St. Louis Cardinals",
+    league: "NL",
+    division: "Central"
+  },
+  139: {
+    team_id_raw: "tb",
+    abbreviation: "TB",
+    full_name: "Tampa Bay Rays",
+    league: "AL",
+    division: "East"
+  },
+  140: {
+    team_id_raw: "tex",
+    abbreviation: "TEX",
+    full_name: "Texas Rangers",
+    league: "AL",
+    division: "West"
+  },
+  141: {
+    team_id_raw: "tor",
+    abbreviation: "TOR",
+    full_name: "Toronto Blue Jays",
+    league: "AL",
+    division: "East"
+  },
+  142: {
+    team_id_raw: "min",
+    abbreviation: "MIN",
+    full_name: "Minnesota Twins",
+    league: "AL",
+    division: "Central"
+  },
+  143: {
+    team_id_raw: "phi",
+    abbreviation: "PHI",
+    full_name: "Philadelphia Phillies",
+    league: "NL",
+    division: "East"
+  },
+  144: {
+    team_id_raw: "atl",
+    abbreviation: "ATL",
+    full_name: "Atlanta Braves",
+    league: "NL",
+    division: "East"
+  },
+  145: {
+    team_id_raw: "cws",
+    abbreviation: "CWS",
+    full_name: "Chicago White Sox",
+    league: "AL",
+    division: "Central"
+  },
+  146: {
+    team_id_raw: "mia",
+    abbreviation: "MIA",
+    full_name: "Miami Marlins",
+    league: "NL",
     division: "East"
   },
   147: {
@@ -39,6 +228,13 @@ const TEAM_METADATA: Record<number, Omit<CanonicalTeam, "team_id" | "sport_id"> 
     full_name: "New York Yankees",
     league: "AL",
     division: "East"
+  },
+  158: {
+    team_id_raw: "mil",
+    abbreviation: "MIL",
+    full_name: "Milwaukee Brewers",
+    league: "NL",
+    division: "Central"
   }
 };
 
@@ -162,7 +358,18 @@ const buildVenue = (venue: MlbStatsApiScheduleGame["venue"]): CanonicalVenue | n
     return null;
   }
 
-  return VENUE_METADATA[venue.id] ?? null;
+  return (
+    VENUE_METADATA[venue.id] ?? {
+      venue_id: asVenueId(`mlb-venue-${venue.id}-${slugify(venue.name)}`),
+      name: venue.name,
+      city: null,
+      state: null,
+      country: "USA",
+      is_dome: null,
+      is_retractable_roof: null,
+      park_factor_runs: null
+    }
+  );
 };
 
 export const normalizeMlbStatsApiGame = (

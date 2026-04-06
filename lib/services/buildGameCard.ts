@@ -1,11 +1,16 @@
-﻿import type { PreparedGameInputs } from "@lib/contracts/prepared";
+import type { ProjectionLineage } from "@lib/contracts/projection-lineage";
+import type { PreparedGameInputs } from "@lib/contracts/prepared";
 import type { BlockedState } from "@lib/contracts/types";
+import { createProjectionLineage } from "@lib/contracts/projection-lineage";
 import type { OddsFormat } from "@lib/market/odds";
 import {
   buildTotalMarketEdgeFromSamples,
   buildTwoWayMarketEdgeFromOdds
 } from "@lib/market/edge";
-import { assembleGameProjection } from "@lib/projections/assembleGameProjection";
+import {
+  assembleGameProjection,
+  type AssembledGameProjection
+} from "@lib/projections/assembleGameProjection";
 import { simulateGames } from "@lib/simulation/simulateGames";
 
 export interface GameCardMarketInput {
@@ -33,6 +38,7 @@ export interface GameCard {
   readonly game_id: string;
   readonly away_team_id: string;
   readonly home_team_id: string;
+  readonly projection_lineage: ProjectionLineage;
   readonly deterministic: {
     readonly derived_from: "deterministic";
     readonly projected_away_runs: number | null;
@@ -62,45 +68,23 @@ export interface GameCard {
   readonly blocked: BlockedState;
 }
 
-type SimulatableGameProjectionInput = {
-  readonly blocked?: BlockedState;
-  readonly metadata?: {
-    readonly blocked?: BlockedState;
-  };
-  readonly away: {
-    readonly projected_runs: number;
-  };
-  readonly home: {
-    readonly projected_runs: number;
-  };
-  readonly projected_total: number;
-};
-
 const readBlockedState = (
   preparedInputs: PreparedGameInputs,
-  gameProjection: SimulatableGameProjectionInput
-): BlockedState =>
-  gameProjection.blocked ??
-  gameProjection.metadata?.blocked ??
-  preparedInputs.blocked;
-
-const extractGameProjection = (
-  preparedInputs: PreparedGameInputs
-): SimulatableGameProjectionInput => {
-  const assembled = assembleGameProjection(preparedInputs) as unknown as {
-    readonly game_projection?: SimulatableGameProjectionInput;
-    readonly game?: SimulatableGameProjectionInput;
-  } & SimulatableGameProjectionInput;
-
-  return assembled.game_projection ?? assembled.game ?? assembled;
-};
+  gameProjection: AssembledGameProjection["game_projection"]
+): BlockedState => gameProjection.metadata.blocked ?? preparedInputs.blocked;
 
 export const buildGameCard = (
   preparedInputs: PreparedGameInputs,
   options: BuildGameCardOptions = {}
 ): GameCard => {
-  const gameProjection = extractGameProjection(preparedInputs);
+  const assembled = assembleGameProjection(preparedInputs);
+  const gameProjection = assembled.game_projection;
   const blocked = readBlockedState(preparedInputs, gameProjection);
+  const projectionLineage = createProjectionLineage({
+    game_id: preparedInputs.game_id,
+    prepared_at: preparedInputs.prepared_at,
+    metadata: gameProjection.metadata
+  });
 
   const simulations = blocked.is_blocked
     ? null
@@ -146,6 +130,7 @@ export const buildGameCard = (
     game_id: preparedInputs.game_id,
     away_team_id: preparedInputs.away_team.team_id,
     home_team_id: preparedInputs.home_team.team_id,
+    projection_lineage: projectionLineage,
     deterministic: {
       derived_from: "deterministic",
       projected_away_runs: blocked.is_blocked ? null : gameProjection.away.projected_runs,

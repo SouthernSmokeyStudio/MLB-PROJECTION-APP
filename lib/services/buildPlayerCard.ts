@@ -1,6 +1,11 @@
-﻿import type { PreparedGameInputs } from "@lib/contracts/prepared";
+import type { ProjectionLineage } from "@lib/contracts/projection-lineage";
+import type { PreparedGameInputs } from "@lib/contracts/prepared";
 import type { BlockedState } from "@lib/contracts/types";
-import { assembleGameProjection } from "@lib/projections/assembleGameProjection";
+import { createProjectionLineage } from "@lib/contracts/projection-lineage";
+import {
+  assembleGameProjection,
+  type AssembledGameProjection
+} from "@lib/projections/assembleGameProjection";
 import { projectFantasyPoints } from "@lib/scoring/projectFantasyPoints";
 import { simulateFantasy } from "@lib/simulation/simulateFantasy";
 
@@ -8,6 +13,7 @@ export interface PlayerCard {
   readonly player_id: string;
   readonly team_id: string;
   readonly game_id: string;
+  readonly projection_lineage: ProjectionLineage;
   readonly deterministic_summary:
     | {
         readonly kind: "pitcher";
@@ -109,7 +115,8 @@ const toBatterSummary = (value: GenericRecord): PlayerCard["deterministic_summar
 const setDeterministicCandidate = (
   map: Map<string, PlayerCard>,
   candidate: unknown,
-  blocked: BlockedState
+  blocked: BlockedState,
+  projectionLineage: ProjectionLineage
 ): void => {
   if (!hasPlayerIdentity(candidate)) {
     return;
@@ -130,6 +137,7 @@ const setDeterministicCandidate = (
     player_id: playerId,
     team_id: candidate.team_id as string,
     game_id: candidate.game_id as string,
+    projection_lineage: projectionLineage,
     deterministic_summary: deterministicSummary,
     fantasy_summary: existing?.fantasy_summary ?? null,
     simulation_summary: existing?.simulation_summary ?? null,
@@ -140,8 +148,9 @@ const setDeterministicCandidate = (
 };
 
 const extractDeterministicPlayers = (
-  assembled: unknown,
-  blocked: BlockedState
+  assembled: AssembledGameProjection,
+  blocked: BlockedState,
+  projectionLineage: ProjectionLineage
 ): Map<string, PlayerCard> => {
   const map = new Map<string, PlayerCard>();
 
@@ -150,17 +159,21 @@ const extractDeterministicPlayers = (
   }
 
   const directCandidates = [
-  assembled.away_pitcher,
-  assembled.home_pitcher,
-  isRecord(assembled.pitcher_projections) ? assembled.pitcher_projections.away_pitcher : undefined,
-  isRecord(assembled.pitcher_projections) ? assembled.pitcher_projections.home_pitcher : undefined,
-  isRecord(assembled.pitchers) ? assembled.pitchers.away_pitcher : undefined,
-  isRecord(assembled.pitchers) ? assembled.pitchers.home_pitcher : undefined
-];
+    assembled.away_pitcher,
+    assembled.home_pitcher,
+    isRecord(assembled.pitcher_projections)
+      ? assembled.pitcher_projections.away_pitcher
+      : undefined,
+    isRecord(assembled.pitcher_projections)
+      ? assembled.pitcher_projections.home_pitcher
+      : undefined,
+    isRecord(assembled.pitchers) ? assembled.pitchers.away_pitcher : undefined,
+    isRecord(assembled.pitchers) ? assembled.pitchers.home_pitcher : undefined
+  ];
 
-directCandidates.forEach((candidate) => {
-  setDeterministicCandidate(map, candidate, blocked);
-});
+  directCandidates.forEach((candidate) => {
+    setDeterministicCandidate(map, candidate, blocked, projectionLineage);
+  });
 
   const arrayCandidates = [
     assembled.batter_projections,
@@ -172,7 +185,9 @@ directCandidates.forEach((candidate) => {
 
   arrayCandidates.forEach((candidate) => {
     if (Array.isArray(candidate)) {
-      candidate.forEach((item) => setDeterministicCandidate(map, item, blocked));
+      candidate.forEach((item) =>
+        setDeterministicCandidate(map, item, blocked, projectionLineage)
+      );
     }
   });
 
@@ -183,10 +198,19 @@ export const buildPlayerCards = (
   preparedInputs: PreparedGameInputs,
   options: BuildPlayerCardOptions = {}
 ): PlayerCardsResult => {
-  const assembled = assembleGameProjection(preparedInputs) as unknown;
+  const assembled = assembleGameProjection(preparedInputs);
   const fantasy = projectFantasyPoints(assembled as never);
   const blocked = readBlockedState(preparedInputs, fantasy.blocked);
-  const deterministicPlayers = extractDeterministicPlayers(assembled, blocked);
+  const projectionLineage = createProjectionLineage({
+    game_id: preparedInputs.game_id,
+    prepared_at: preparedInputs.prepared_at,
+    metadata: assembled.game_projection.metadata
+  });
+  const deterministicPlayers = extractDeterministicPlayers(
+    assembled,
+    blocked,
+    projectionLineage
+  );
 
   const simulations = fantasy.blocked.is_blocked
     ? null
@@ -199,6 +223,7 @@ export const buildPlayerCards = (
       player_id: player.player_id,
       team_id: player.team_id,
       game_id: player.game_id,
+      projection_lineage: projectionLineage,
       deterministic_summary: existing?.deterministic_summary ?? null,
       fantasy_summary: {
         platform: player.platform,
@@ -223,6 +248,7 @@ export const buildPlayerCards = (
       player_id: player.player_id,
       team_id: player.team_id,
       game_id: player.game_id,
+      projection_lineage: projectionLineage,
       deterministic_summary: existing?.deterministic_summary ?? null,
       fantasy_summary: {
         platform: player.platform,

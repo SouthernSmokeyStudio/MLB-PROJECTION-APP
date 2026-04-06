@@ -22,6 +22,29 @@ final class SSS_MLB_Events_Repository extends SSS_MLB_Base_Repository {
         return is_array($row) ? $row : null;
     }
 
+    public function get_first_real_upcoming_event(int $limit = 25): ?array {
+        $now = current_time('mysql', true);
+        $sql = $this->wpdb->prepare(
+            "SELECT *
+             FROM {$this->table('events')}
+             WHERE scheduled_start_utc >= %s
+               AND event_key <> %s
+               AND id IS NOT NULL
+               AND home_team_id IS NOT NULL
+               AND home_team_id > 0
+               AND away_team_id IS NOT NULL
+               AND away_team_id > 0
+             ORDER BY scheduled_start_utc ASC
+             LIMIT %d",
+            $now,
+            'validation_demo_phase1a_event',
+            $limit
+        );
+
+        $row = $this->wpdb->get_row($sql, ARRAY_A);
+        return is_array($row) ? $row : null;
+    }
+
     public function upsert_demo_event(array $event): int {
         $table = $this->table('events');
         $existing_id = (int) $this->wpdb->get_var($this->wpdb->prepare(

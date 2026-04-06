@@ -1,21 +1,34 @@
-﻿import { NextResponse } from "next/server";
-import preparedFixture from "../../../data/fixtures/sample-prepared-game.json";
-import type { PreparedGameInputs } from "@lib/contracts/prepared";
-import { buildSlateView } from "@lib/services";
+import { NextResponse } from "next/server";
+import type { NextRequest } from "next/server";
+import { buildPlayerBoard, getUtcDateString, loadLiveSlate } from "@lib/services";
 
-const prepared = preparedFixture as unknown as PreparedGameInputs;
+const DEFAULT_SIMULATION = {
+  seed: 20260328,
+  iterations: 250
+} as const;
 
-export async function GET(): Promise<Response> {
-  const slate = buildSlateView([prepared], {
-    simulation: {
-      seed: 20260328,
-      iterations: 250
-    }
-  });
+export async function GET(request: NextRequest): Promise<Response> {
+  const date = request.nextUrl.searchParams.get("date") ?? getUtcDateString();
+  const loaded = await loadLiveSlate(date);
 
-  return NextResponse.json({
-    source: "local-fixture",
-    players: slate.players_by_game_id,
-    blocked: slate.blocked
-  });
+  if (!loaded.success) {
+    return NextResponse.json(
+      {
+        source: "mlb-statsapi-live",
+        error: loaded.error
+      },
+      { status: 502 }
+    );
+  }
+
+  return NextResponse.json(
+    buildPlayerBoard(loaded.data.games, {
+      source: loaded.data.source,
+      date: loaded.data.date,
+      generated_at: loaded.data.generated_at,
+      counts: loaded.data.counts,
+      note: loaded.data.note,
+      simulation: DEFAULT_SIMULATION
+    })
+  );
 }
