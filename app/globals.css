@@ -471,6 +471,7 @@ code {
 .dashboard-main {
   display: grid;
   gap: 8px;
+  align-content: start;
 }
 
 .hero-stage {
@@ -649,6 +650,7 @@ code {
 .dashboard-tabbar {
   display: flex;
   overflow-x: auto;
+  overflow-y: hidden;
   gap: 0;
   border: 1px solid var(--panel-border);
   border-radius: 8px;
