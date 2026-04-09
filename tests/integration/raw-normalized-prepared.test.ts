@@ -81,16 +81,28 @@ describe("raw -> normalized -> prepared pipeline", () => {
       throw new Error(normalized.error);
     }
 
+    // Omitting batters causes blocking. Starters are NOT a blocking condition
+    // when probable pitchers are present in the canonical game: buildFallbackPitcherInputs
+    // creates starters with correct player_id and all stat fields null. Those null
+    // stat fields block projectTeamRuns downstream, not prepareGameInputs itself.
     const blocked = prepareGameInputs(normalized.data, {
       prepared_at: validPreparationData.prepared_at,
       away_team: validPreparationData.away_team,
-      home_team: validPreparationData.home_team,
-      away_batters: validPreparationData.away_batters,
-      home_batters: validPreparationData.home_batters
+      home_team: validPreparationData.home_team
+      // away_batters and home_batters intentionally omitted → missing lineup block
     });
 
     expect(blocked.blocked.is_blocked).toBe(true);
-    expect(blocked.blocked.blocked_reason ?? "").toContain("Missing away_starter preparation data");
-    expect(blocked.blocked.blocked_reason ?? "").toContain("Missing home_starter preparation data");
+    expect(blocked.blocked.blocked_reason ?? "").toContain("Missing away_batters preparation data");
+    expect(blocked.blocked.blocked_reason ?? "").toContain("Missing home_batters preparation data");
+
+    // Fallback starters ARE created from the canonical probable pitchers
+    // (not null, not blocked at this layer), but their stat fields are null.
+    expect(blocked.away_starter).not.toBeNull();
+    expect(blocked.away_starter?.player_id).toBe("gerrit-cole");
+    expect(blocked.away_starter?.season_era).toBeNull();
+    expect(blocked.home_starter).not.toBeNull();
+    expect(blocked.home_starter?.player_id).toBe("chris-sale");
+    expect(blocked.home_starter?.season_era).toBeNull();
   });
 });
