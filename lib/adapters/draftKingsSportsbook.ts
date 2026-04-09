@@ -9,6 +9,60 @@ const DRAFTKINGS_SPORTSBOOK_SITE = "US-TN-SB" as const;
 const MLB_LEAGUE_ID = "84240";
 const MONEYLINE_SUBCATEGORY_ID = "4519";
 
+// ---------------------------------------------------------------------------
+// BF-004: DraftKings shortName → canonical team abbreviation normalization
+// ---------------------------------------------------------------------------
+// DraftKings sportsbook participant metadata.shortName uses abbreviations
+// that diverge from our canonical TEAM_METADATA for 3 teams:
+//   WAS → WSH  (Washington Nationals)
+//   A's → ATH  (Athletics)
+//   SFG → SF   (San Francisco Giants)
+//
+// This map is applied at parse time so the internal contract always carries
+// canonical abbreviations. The join logic remains strict equality — no
+// downstream special-casing.
+// ---------------------------------------------------------------------------
+
+const CANONICAL_TEAM_ABBREVIATIONS: ReadonlySet<string> = new Set([
+  "LAA", "ARI", "BAL", "BOS", "CHC", "CIN", "CLE", "COL",
+  "DET", "HOU", "KC",  "LAD", "WSH", "NYM", "ATH", "PIT",
+  "SD",  "SEA", "SF",  "STL", "TB",  "TEX", "TOR", "MIN",
+  "PHI", "ATL", "CWS", "MIA", "NYY", "MIL"
+]);
+
+const DK_SHORTNAME_TO_CANONICAL: Readonly<Record<string, string>> = {
+  "WAS": "WSH",
+  "A's": "ATH",
+  "SFG": "SF"
+};
+
+/**
+ * Normalize a DraftKings sportsbook team shortName into our canonical
+ * abbreviation. Returns the canonical value and any drift warning.
+ *
+ * - Known DK divergences (WAS, A's, SFG) are mapped to canonical.
+ * - Already-canonical values pass through unchanged.
+ * - Unrecognized values pass through with a drift warning so joins
+ *   can still attempt a match, but the caller is notified.
+ */
+export const normalizeDkTeamAbbreviation = (
+  rawShortName: string
+): { readonly canonical: string; readonly drift_warning: string | null } => {
+  const mapped = DK_SHORTNAME_TO_CANONICAL[rawShortName];
+  if (mapped) {
+    return { canonical: mapped, drift_warning: null };
+  }
+
+  if (CANONICAL_TEAM_ABBREVIATIONS.has(rawShortName)) {
+    return { canonical: rawShortName, drift_warning: null };
+  }
+
+  return {
+    canonical: rawShortName,
+    drift_warning: `Unrecognized DraftKings team shortName "${rawShortName}" — not in canonical set or known DK mappings`
+  };
+};
+
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
@@ -109,10 +163,23 @@ const buildMoneylineEntry = ({
   const awayMetadata = isRecord(awayParticipant.metadata) ? awayParticipant.metadata : null;
   const homeMetadata = isRecord(homeParticipant.metadata) ? homeParticipant.metadata : null;
 
-  const awayTeamAbbreviation = readString(awayMetadata?.shortName);
+  const rawAwayShortName = readString(awayMetadata?.shortName);
   const awayTeamName = readString(awayParticipant.name);
-  const homeTeamAbbreviation = readString(homeMetadata?.shortName);
+  const rawHomeShortName = readString(homeMetadata?.shortName);
   const homeTeamName = readString(homeParticipant.name);
+
+  // BF-004: normalize DK shortName → canonical abbreviation at parse boundary
+  const awayNorm = rawAwayShortName ? normalizeDkTeamAbbreviation(rawAwayShortName) : null;
+  const homeNorm = rawHomeShortName ? normalizeDkTeamAbbreviation(rawHomeShortName) : null;
+  const awayTeamAbbreviation = awayNorm?.canonical ?? null;
+  const homeTeamAbbreviation = homeNorm?.canonical ?? null;
+
+  if (awayNorm?.drift_warning) {
+    console.warn(`[BF-004 drift] away: ${awayNorm.drift_warning}`);
+  }
+  if (homeNorm?.drift_warning) {
+    console.warn(`[BF-004 drift] home: ${homeNorm.drift_warning}`);
+  }
   const awayAmerican = parseAmericanOdds(awayDisplayOdds?.american);
   const awayDecimal = parseDecimalOdds(awayDisplayOdds?.decimal);
   const homeAmerican = parseAmericanOdds(homeDisplayOdds?.american);

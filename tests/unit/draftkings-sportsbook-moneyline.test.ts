@@ -4,6 +4,7 @@ import preparedFixture from "../../data/fixtures/sample-prepared-game.json";
 import { parseMlbStatsApiGamePayload } from "../../lib/adapters/mlbStatsApi";
 import {
   fetchDraftKingsSportsbookMlbMoneylineSlate,
+  normalizeDkTeamAbbreviation,
   parseDraftKingsSportsbookMlbMoneylineSlate
 } from "../../lib/adapters/draftKingsSportsbook";
 import type { DraftKingsSportsbookMlbMoneylineSlate } from "../../lib/contracts/draftkings-sportsbook-mlb-moneyline";
@@ -31,6 +32,15 @@ const sourceGame = {
   parsedGame: parsed.data,
   canonicalGame: normalized.data,
   preparedGame: prepared,
+  liveScoreState: {
+    away_score: null,
+    home_score: null,
+    inning_number: null,
+    inning_state: null,
+    is_live: false,
+    is_final: false,
+    display_state: "Scheduled"
+  },
   playerIdentities: {}
 };
 
@@ -385,3 +395,399 @@ describe("DraftKings Sportsbook MLB moneyline prerequisite", () => {
     expect(parsedSlate.data.entries[0]?.home_team_abbreviation).toBe("TB");
   });
 });
+
+// ---------------------------------------------------------------------------
+// BF-004: DraftKings team abbreviation normalization
+// ---------------------------------------------------------------------------
+
+describe("BF-004 — DraftKings team abbreviation normalization", () => {
+  it("normalizes DK shortName 'WAS' to canonical 'WSH'", () => {
+    const result = normalizeDkTeamAbbreviation("WAS");
+    expect(result.canonical).toBe("WSH");
+    expect(result.drift_warning).toBeNull();
+  });
+
+  it("normalizes DK shortName 'A's' to canonical 'ATH'", () => {
+    const result = normalizeDkTeamAbbreviation("A's");
+    expect(result.canonical).toBe("ATH");
+    expect(result.drift_warning).toBeNull();
+  });
+
+  it("normalizes DK shortName 'SFG' to canonical 'SF'", () => {
+    const result = normalizeDkTeamAbbreviation("SFG");
+    expect(result.canonical).toBe("SF");
+    expect(result.drift_warning).toBeNull();
+  });
+
+  it("passes through already-canonical 'LAA' unchanged", () => {
+    const result = normalizeDkTeamAbbreviation("LAA");
+    expect(result.canonical).toBe("LAA");
+    expect(result.drift_warning).toBeNull();
+  });
+
+  it("passes through already-canonical 'CWS' unchanged (regression guard)", () => {
+    const result = normalizeDkTeamAbbreviation("CWS");
+    expect(result.canonical).toBe("CWS");
+    expect(result.drift_warning).toBeNull();
+  });
+
+  it("emits drift warning for unrecognized shortName", () => {
+    const result = normalizeDkTeamAbbreviation("XYZZY");
+    expect(result.canonical).toBe("XYZZY");
+    expect(result.drift_warning).toContain("Unrecognized");
+    expect(result.drift_warning).toContain("XYZZY");
+  });
+
+  it("normalizes WAS at parse time so the contract carries canonical WSH", () => {
+    const payload = buildDkPayloadWithShortNames("WAS", "NYY");
+    const result = parseDraftKingsSportsbookMlbMoneylineSlate({
+      fetchedAt: asISOTimestamp("2026-04-06T17:00:00Z"),
+      payload
+    });
+
+    expect(result.success).toBe(true);
+    if (!result.success) throw new Error(result.error);
+    expect(result.data.entries[0]?.away_team_abbreviation).toBe("WSH");
+    expect(result.data.entries[0]?.home_team_abbreviation).toBe("NYY");
+  });
+
+  it("normalizes A's at parse time so the contract carries canonical ATH", () => {
+    const payload = buildDkPayloadWithShortNames("A's", "SEA");
+    const result = parseDraftKingsSportsbookMlbMoneylineSlate({
+      fetchedAt: asISOTimestamp("2026-04-06T17:00:00Z"),
+      payload
+    });
+
+    expect(result.success).toBe(true);
+    if (!result.success) throw new Error(result.error);
+    expect(result.data.entries[0]?.away_team_abbreviation).toBe("ATH");
+  });
+
+  it("normalizes SFG at parse time so the contract carries canonical SF", () => {
+    const payload = buildDkPayloadWithShortNames("SFG", "LAD");
+    const result = parseDraftKingsSportsbookMlbMoneylineSlate({
+      fetchedAt: asISOTimestamp("2026-04-06T17:00:00Z"),
+      payload
+    });
+
+    expect(result.success).toBe(true);
+    if (!result.success) throw new Error(result.error);
+    expect(result.data.entries[0]?.away_team_abbreviation).toBe("SF");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// BF-004: parse-level normalization proof (adapter boundary only)
+// ---------------------------------------------------------------------------
+
+describe("BF-004 — adapter parse normalization", () => {
+  it("DK shortName 'WAS' is normalized to 'WSH' in parsed contract", () => {
+    const payload = buildDkPayloadWithShortNames("WAS", "NYY");
+    const result = parseDraftKingsSportsbookMlbMoneylineSlate({
+      fetchedAt: asISOTimestamp("2026-04-06T17:00:00Z"),
+      payload
+    });
+
+    expect(result.success).toBe(true);
+    if (!result.success) throw new Error(result.error);
+    expect(result.data.entries[0]?.away_team_abbreviation).toBe("WSH");
+    expect(result.data.entries[0]?.home_team_abbreviation).toBe("NYY");
+  });
+
+  it("DK shortName 'SFG' is normalized to 'SF' in parsed contract", () => {
+    const payload = buildDkPayloadWithShortNames("SFG", "LAD");
+    const result = parseDraftKingsSportsbookMlbMoneylineSlate({
+      fetchedAt: asISOTimestamp("2026-04-06T17:00:00Z"),
+      payload
+    });
+
+    expect(result.success).toBe(true);
+    if (!result.success) throw new Error(result.error);
+    expect(result.data.entries[0]?.away_team_abbreviation).toBe("SF");
+  });
+
+  it("DK shortName 'A's' is normalized to 'ATH' in parsed contract", () => {
+    const payload = buildDkPayloadWithShortNames("A's", "SEA");
+    const result = parseDraftKingsSportsbookMlbMoneylineSlate({
+      fetchedAt: asISOTimestamp("2026-04-06T17:00:00Z"),
+      payload
+    });
+
+    expect(result.success).toBe(true);
+    if (!result.success) throw new Error(result.error);
+    expect(result.data.entries[0]?.away_team_abbreviation).toBe("ATH");
+  });
+
+  it("drift visibility: console.warn fires for unrecognized shortName", () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const payload = buildDkPayloadWithShortNames("XYZZY", "NYY");
+    parseDraftKingsSportsbookMlbMoneylineSlate({
+      fetchedAt: asISOTimestamp("2026-04-06T17:00:00Z"),
+      payload
+    });
+
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining("[BF-004 drift]")
+    );
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining("XYZZY")
+    );
+
+    warnSpy.mockRestore();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// BF-004: end-to-end join proof — raw DK shortName → adapter parse →
+// joinDraftKingsSportsbookMoneylines → ready_games === 1
+//
+// Each test constructs:
+//   1. A raw DK payload with the mismatched shortName
+//   2. Parses it through the adapter (normalization happens here)
+//   3. A synthetic sourceGame whose canonical abbreviation is the canonical value
+//   4. Feeds both into joinDraftKingsSportsbookMoneylines
+//   5. Asserts ready_games === 1
+//
+// This proves the full path: raw DK → adapter → normalized slate → join succeeds.
+// ---------------------------------------------------------------------------
+
+/**
+ * Build a synthetic LiveSlateSourceGame by cloning the fixture sourceGame
+ * and overriding the canonical team abbreviations. The join only reads
+ * canonicalGame.{away,home}.team.abbreviation, canonicalGame.scheduled_start,
+ * and preparedGame (for GameCard building), so this is sufficient.
+ */
+const buildSourceGameWithTeams = (
+  awayAbbreviation: string,
+  homeAbbreviation: string,
+  scheduledStart: string = sourceGame.canonicalGame.scheduled_start
+) => ({
+  ...sourceGame,
+  canonicalGame: {
+    ...sourceGame.canonicalGame,
+    scheduled_start: asISOTimestamp(scheduledStart),
+    away: {
+      ...sourceGame.canonicalGame.away,
+      team: {
+        ...sourceGame.canonicalGame.away.team,
+        abbreviation: awayAbbreviation
+      }
+    },
+    home: {
+      ...sourceGame.canonicalGame.home,
+      team: {
+        ...sourceGame.canonicalGame.home.team,
+        abbreviation: homeAbbreviation
+      }
+    }
+  }
+});
+
+describe("BF-004 — end-to-end join proof: raw DK shortName → parse → join succeeds", () => {
+  it("raw DK 'WAS' → adapter normalizes to 'WSH' → join against canonical WSH succeeds", () => {
+    // Step 1-2: Parse raw DK payload where away shortName is "WAS"
+    const rawPayload = buildDkPayloadWithShortNames("WAS", "BOS");
+    const parsedSlate = parseDraftKingsSportsbookMlbMoneylineSlate({
+      fetchedAt: asISOTimestamp("2026-04-06T17:00:00Z"),
+      payload: rawPayload
+    });
+    expect(parsedSlate.success).toBe(true);
+    if (!parsedSlate.success) throw new Error(parsedSlate.error);
+
+    // Verify normalization happened
+    expect(parsedSlate.data.entries[0]?.away_team_abbreviation).toBe("WSH");
+
+    // Step 3: Build sourceGame with canonical "WSH" as away team
+    const syntheticSource = buildSourceGameWithTeams(
+      "WSH", "BOS",
+      "2026-04-06T20:10:00Z" // must be within ±30min of DK startEventDate
+    );
+
+    // Step 4-5: Feed both into the actual join function
+    const joined = joinDraftKingsSportsbookMoneylines({
+      sourceGames: [syntheticSource],
+      moneylineSlate: parsedSlate.data,
+      options: { simulation: { seed: 17, iterations: 250 } }
+    });
+
+    expect(joined.ready_games).toBe(1);
+    expect(joined.held_games).toBe(0);
+    expect(joined.games[0]?.draftkings_sportsbook_moneyline.blocked.is_blocked).toBe(false);
+  });
+
+  it("raw DK 'A's' → adapter normalizes to 'ATH' → join against canonical ATH succeeds", () => {
+    const rawPayload = buildDkPayloadWithShortNames("A's", "SEA");
+    const parsedSlate = parseDraftKingsSportsbookMlbMoneylineSlate({
+      fetchedAt: asISOTimestamp("2026-04-06T17:00:00Z"),
+      payload: rawPayload
+    });
+    expect(parsedSlate.success).toBe(true);
+    if (!parsedSlate.success) throw new Error(parsedSlate.error);
+
+    expect(parsedSlate.data.entries[0]?.away_team_abbreviation).toBe("ATH");
+
+    const syntheticSource = buildSourceGameWithTeams(
+      "ATH", "SEA",
+      "2026-04-06T20:10:00Z"
+    );
+
+    const joined = joinDraftKingsSportsbookMoneylines({
+      sourceGames: [syntheticSource],
+      moneylineSlate: parsedSlate.data,
+      options: { simulation: { seed: 17, iterations: 250 } }
+    });
+
+    expect(joined.ready_games).toBe(1);
+    expect(joined.held_games).toBe(0);
+    expect(joined.games[0]?.draftkings_sportsbook_moneyline.blocked.is_blocked).toBe(false);
+  });
+
+  it("raw DK 'SFG' → adapter normalizes to 'SF' → join against canonical SF succeeds", () => {
+    const rawPayload = buildDkPayloadWithShortNames("SFG", "LAD");
+    const parsedSlate = parseDraftKingsSportsbookMlbMoneylineSlate({
+      fetchedAt: asISOTimestamp("2026-04-06T17:00:00Z"),
+      payload: rawPayload
+    });
+    expect(parsedSlate.success).toBe(true);
+    if (!parsedSlate.success) throw new Error(parsedSlate.error);
+
+    expect(parsedSlate.data.entries[0]?.away_team_abbreviation).toBe("SF");
+
+    const syntheticSource = buildSourceGameWithTeams(
+      "SF", "LAD",
+      "2026-04-06T20:10:00Z"
+    );
+
+    const joined = joinDraftKingsSportsbookMoneylines({
+      sourceGames: [syntheticSource],
+      moneylineSlate: parsedSlate.data,
+      options: { simulation: { seed: 17, iterations: 250 } }
+    });
+
+    expect(joined.ready_games).toBe(1);
+    expect(joined.held_games).toBe(0);
+    expect(joined.games[0]?.draftkings_sportsbook_moneyline.blocked.is_blocked).toBe(false);
+  });
+
+  it("negative control: raw DK 'WAS' without normalization would NOT join against canonical WSH", () => {
+    // Prove the join would fail if the adapter passed through "WAS" unnormalized.
+    // We hand-build a slate with raw "WAS" (bypassing the adapter) and show it fails.
+    const syntheticSource = buildSourceGameWithTeams(
+      "WSH", "BOS",
+      "2026-04-06T20:10:00Z"
+    );
+
+    const slateThatBypassesAdapter = makeMoneylineSlate([
+      {
+        away_team_abbreviation: "WAS", // raw DK value, not normalized
+        home_team_abbreviation: "BOS",
+        start_time: asISOTimestamp("2026-04-06T20:10:00Z")
+      }
+    ]);
+
+    const joined = joinDraftKingsSportsbookMoneylines({
+      sourceGames: [syntheticSource],
+      moneylineSlate: slateThatBypassesAdapter,
+      options: { simulation: { seed: 17, iterations: 250 } }
+    });
+
+    // Without normalization, "WAS" !== "WSH" → join fails
+    expect(joined.ready_games).toBe(0);
+    expect(joined.held_games).toBe(1);
+    expect(joined.games[0]?.draftkings_sportsbook_moneyline.blocked.is_blocked).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// BF-004 test helper: builds a minimal DK-shaped raw payload with controlled
+// shortName values so we can prove normalization at the adapter boundary.
+// ---------------------------------------------------------------------------
+
+function buildDkPayloadWithShortNames(
+  awayShortName: string,
+  homeShortName: string
+) {
+  return {
+    sports: [],
+    leagues: [],
+    events: [
+      {
+        id: "99900001",
+        seoIdentifier: "test-game",
+        sportId: "7",
+        leagueId: "84240",
+        name: `${awayShortName} Team @ ${homeShortName} Team`,
+        startEventDate: "2026-04-06T20:10:00.0000000Z",
+        participants: [
+          {
+            id: "home-1",
+            name: `${homeShortName} Team`,
+            venueRole: "Home",
+            type: "Team",
+            metadata: {
+              shortName: homeShortName,
+              startingPitcherPlayerName: "Home Pitcher"
+            }
+          },
+          {
+            id: "away-1",
+            name: `${awayShortName} Team`,
+            venueRole: "Away",
+            type: "Team",
+            metadata: {
+              shortName: awayShortName,
+              startingPitcherPlayerName: "Away Pitcher"
+            }
+          }
+        ],
+        eventParticipantType: "TwoTeam",
+        status: "NOT_STARTED",
+        metadata: {},
+        sortOrder: 1,
+        subscriptionKey: "test"
+      }
+    ],
+    markets: [
+      {
+        id: "1_99900001",
+        eventId: "99900001",
+        sportId: "7",
+        leagueId: "84240",
+        name: "Moneyline",
+        subcategoryId: "4519",
+        marketType: { id: "1_0", betOfferTypeId: 2, name: "Moneyline" },
+        subscriptionKey: "test",
+        sortOrder: 1,
+        tags: ["Default", "PrimaryMarket"]
+      }
+    ],
+    selections: [
+      {
+        id: "sel-away",
+        marketId: "1_99900001",
+        label: `${awayShortName} Team`,
+        displayOdds: { american: "+110", decimal: "2.10" },
+        trueOdds: 2.1,
+        outcomeType: "Away",
+        participants: [{ id: "away-1", name: `${awayShortName} Team`, venueRole: "Away" }],
+        sortOrder: 1,
+        tags: [],
+        metadata: {}
+      },
+      {
+        id: "sel-home",
+        marketId: "1_99900001",
+        label: `${homeShortName} Team`,
+        displayOdds: { american: "-130", decimal: "1.77" },
+        trueOdds: 1.77,
+        outcomeType: "Home",
+        participants: [{ id: "home-1", name: `${homeShortName} Team`, venueRole: "Home" }],
+        sortOrder: 2,
+        tags: [],
+        metadata: {}
+      }
+    ],
+    subscriptionPartials: {}
+  };
+}

@@ -14,12 +14,16 @@ vi.mock("@lib/services", async () => {
     ...actual,
     getUtcDateString: () => "2026-03-27",
     loadLiveSlate: vi.fn(),
-    loadDraftKingsSportsbookMlbMoneylineSlate: vi.fn()
+    loadDraftKingsSportsbookMlbMoneylineSlate: vi.fn(),
+    buildSlateSnapshot: vi.fn(),
+    buildBettingEdgeBoard: vi.fn()
   };
 });
 
 import { GET } from "@/app/api/betting-edge/route";
 import {
+  buildBettingEdgeBoard,
+  buildSlateSnapshot,
   loadDraftKingsSportsbookMlbMoneylineSlate,
   loadLiveSlate
 } from "@lib/services";
@@ -36,6 +40,16 @@ const normalized = normalizeMlbStatsApiGame(parsed.data);
 if (!normalized.success) {
   throw new Error(normalized.error);
 }
+
+const EMPTY_LIVE_SCORE_STATE = {
+  away_score: null,
+  home_score: null,
+  inning_number: null,
+  inning_state: null,
+  is_live: false,
+  is_final: false,
+  display_state: "Scheduled"
+} as const;
 
 const makeMoneylineSlate = (): DraftKingsSportsbookMlbMoneylineSlate => ({
   provider: "draftkings-sportsbook",
@@ -96,7 +110,8 @@ describe("/api/betting-edge route", () => {
             parsedGame: parsed.data,
             canonicalGame: normalized.data,
             preparedGame: prepared,
-            playerIdentities: {}
+            playerIdentities: {},
+            liveScoreState: EMPTY_LIVE_SCORE_STATE
           }
         ]
       }
@@ -111,6 +126,140 @@ describe("/api/betting-edge route", () => {
         note: null
       }
     });
+    vi.mocked(buildSlateSnapshot).mockReturnValue({
+      source: "mlb-statsapi-live",
+      mode: "slate-snapshot-v1",
+      version: 1,
+      date: "2026-03-27",
+      generated_at: "2026-03-27T15:30:00Z",
+      counts: {
+        fetched_raw: 1,
+        parsed: 1,
+        normalized: 1,
+        prepared: 1,
+        boxscore_enriched: 1
+      },
+      publication: {
+        is_complete: false,
+        blocked_sections: ["smoke_signal", "live_scoreboard"]
+      },
+      degradation: {
+        schedule: { state: "ready", reason: null },
+        player_projections: { state: "ready", reason: null },
+        dfs_edge: { state: "blocked", reason: "blocked" },
+        betting_edge: { state: "ready", reason: null },
+        smoke_signal: { state: "blocked", reason: "blocked" },
+        live_scoreboard: { state: "blocked", reason: "blocked" }
+      },
+      schedule: { status: { state: "ready", reason: null }, payload: null },
+      player_projections: { status: { state: "ready", reason: null }, payload: null },
+      dfs_edge: { status: { state: "blocked", reason: "blocked" }, payload: null },
+      betting_edge: {
+        status: { state: "ready", reason: null },
+        payload: {
+          source: "mlb-statsapi-live+draftkings-sportsbook-moneyline",
+          mode: "betting-edge-board-v1",
+          date: "2026-03-27",
+          generated_at: "2026-03-27T15:30:00Z",
+          draftkings_sportsbook_moneyline: {
+            provider: "draftkings-sportsbook",
+            sport: "MLB",
+            market_type: "moneyline",
+            site: "US-TN-SB",
+            label: "DraftKings Sportsbook MLB Pregame Moneyline"
+          },
+          summary: {
+            total_games: 1,
+            ready_games: 1,
+            held_games: 0,
+            average_ready_edge: 0.05,
+            top_edge_side: {
+              game_id: "mlb-2026-03-27-nyy-bos",
+              matchup: "New York Yankees at Boston Red Sox",
+              team_abbreviation: "NYY",
+              team_full_name: "New York Yankees",
+              opponent_team_abbreviation: "BOS",
+              market_odds_american: 110,
+              fair_american_odds: -122,
+              model_probability: 0.55,
+              edge: 0.05
+            }
+          },
+          counts: {
+            fetched_raw: 1,
+            parsed: 1,
+            normalized: 1,
+            prepared: 1,
+            boxscore_enriched: 1,
+            moneyline_entries: 1,
+            matched_markets: 1
+          },
+          ready_games: [
+            {
+              game_id: "mlb-2026-03-27-nyy-bos",
+              matchup: "New York Yankees at Boston Red Sox",
+              scheduled_start: "2026-03-27T23:05:00Z",
+              status: "scheduled",
+              venue_name: "Fenway Park",
+              away_team_abbreviation: "NYY",
+              away_team_full_name: "New York Yankees",
+              home_team_abbreviation: "BOS",
+              home_team_full_name: "Boston Red Sox",
+              projection: {
+                blocked: {
+                  is_blocked: false,
+                  blocked_reason: null
+                },
+                projected_away_runs: 4.6,
+                projected_home_runs: 3.9,
+                projected_total: 8.5,
+                away_win_probability: 0.55,
+                home_win_probability: 0.45
+              },
+              draftkings_sportsbook_moneyline: {
+                provider: "draftkings-sportsbook",
+                sport: "MLB",
+                market_type: "moneyline",
+                event_id: "33937444",
+                market_id: "1_84191347",
+                away_odds_american: 110,
+                home_odds_american: -130,
+                away: {
+                  team_side: "away",
+                  team_abbreviation: "NYY",
+                  team_full_name: "New York Yankees",
+                  market_odds_american: 110,
+                  model_probability: 0.55,
+                  market_implied_probability: 0.47619,
+                  market_no_vig_probability: 0.5,
+                  edge: 0.05,
+                  fair_american_odds: -122
+                },
+                home: {
+                  team_side: "home",
+                  team_abbreviation: "BOS",
+                  team_full_name: "Boston Red Sox",
+                  market_odds_american: -130,
+                  model_probability: 0.45,
+                  market_implied_probability: 0.565217,
+                  market_no_vig_probability: 0.5,
+                  edge: -0.05,
+                  fair_american_odds: 122
+                },
+                blocked: {
+                  is_blocked: false,
+                  blocked_reason: null
+                }
+              }
+            }
+          ],
+          held_games: [],
+          note: null
+        }
+      },
+      smoke_signal: { status: { state: "blocked", reason: "blocked" }, payload: null },
+      live_scoreboard: { status: { state: "blocked", reason: "blocked" }, payload: null }
+    } as never);
 
     const response = await GET(
       new NextRequest("http://localhost/api/betting-edge?date=2026-03-27")
@@ -122,6 +271,8 @@ describe("/api/betting-edge route", () => {
     expect(loadDraftKingsSportsbookMlbMoneylineSlate).toHaveBeenCalledWith({
       date: "2026-03-27"
     });
+    expect(buildSlateSnapshot).toHaveBeenCalledTimes(1);
+    expect(buildBettingEdgeBoard).not.toHaveBeenCalled();
     expect(payload.mode).toBe("betting-edge-board-v1");
     expect(payload.source).toBe("mlb-statsapi-live+draftkings-sportsbook-moneyline");
 
@@ -155,7 +306,8 @@ describe("/api/betting-edge route", () => {
             parsedGame: parsed.data,
             canonicalGame: normalized.data,
             preparedGame: prepared,
-            playerIdentities: {}
+            playerIdentities: {},
+            liveScoreState: EMPTY_LIVE_SCORE_STATE
           }
         ]
       }
@@ -170,6 +322,47 @@ describe("/api/betting-edge route", () => {
         note: "No DraftKings Sportsbook MLB pregame moneyline rows matched the requested date."
       }
     });
+    vi.mocked(buildSlateSnapshot).mockReturnValue({
+      source: "mlb-statsapi-live",
+      mode: "slate-snapshot-v1",
+      version: 1,
+      date: "2026-03-27",
+      generated_at: "2026-03-27T15:30:00Z",
+      counts: {
+        fetched_raw: 1,
+        parsed: 1,
+        normalized: 1,
+        prepared: 1,
+        boxscore_enriched: 1
+      },
+      publication: {
+        is_complete: false,
+        blocked_sections: ["betting_edge", "smoke_signal", "live_scoreboard"]
+      },
+      degradation: {
+        schedule: { state: "ready", reason: null },
+        player_projections: { state: "ready", reason: null },
+        dfs_edge: { state: "blocked", reason: "blocked" },
+        betting_edge: {
+          state: "blocked",
+          reason: "No DraftKings Sportsbook MLB pregame moneyline rows matched the requested date."
+        },
+        smoke_signal: { state: "blocked", reason: "blocked" },
+        live_scoreboard: { state: "blocked", reason: "blocked" }
+      },
+      schedule: { status: { state: "ready", reason: null }, payload: null },
+      player_projections: { status: { state: "ready", reason: null }, payload: null },
+      dfs_edge: { status: { state: "blocked", reason: "blocked" }, payload: null },
+      betting_edge: {
+        status: {
+          state: "blocked",
+          reason: "No DraftKings Sportsbook MLB pregame moneyline rows matched the requested date."
+        },
+        payload: null
+      },
+      smoke_signal: { status: { state: "blocked", reason: "blocked" }, payload: null },
+      live_scoreboard: { status: { state: "blocked", reason: "blocked" }, payload: null }
+    } as never);
 
     const response = await GET(
       new NextRequest("http://localhost/api/betting-edge?date=2026-03-27")
@@ -184,6 +377,8 @@ describe("/api/betting-edge route", () => {
     );
     expect(payload.ready_games).toEqual([]);
     expect(payload.held_games).toEqual([]);
+    expect(buildSlateSnapshot).toHaveBeenCalledTimes(1);
+    expect(buildBettingEdgeBoard).not.toHaveBeenCalled();
   });
 
   it("returns a 502 when the sportsbook moneyline loader fails", async () => {
@@ -215,5 +410,7 @@ describe("/api/betting-edge route", () => {
     expect(response.status).toBe(502);
     expect(payload.source).toBe("mlb-statsapi-live+draftkings-sportsbook-moneyline");
     expect(payload.error).toBe("moneyline fetch failed");
+    expect(buildSlateSnapshot).not.toHaveBeenCalled();
+    expect(buildBettingEdgeBoard).not.toHaveBeenCalled();
   });
 });
