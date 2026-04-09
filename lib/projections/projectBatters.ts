@@ -113,7 +113,7 @@ const buildTeamBatterProjection = (
       seasonPa === null ||
       seasonSb === null
     ) {
-      return null;
+      continue;
     }
 
     const basePa = PA_BY_SLOT[slot] ?? 3.7;
@@ -232,7 +232,11 @@ export const projectBatters = (inputs: PreparedGameInputs): BatterProjectionResu
   );
 
   if (!awayBatters || !homeBatters) {
-    return buildBlocked("Missing required batter baseline fields for deterministic batter projections");
+    return buildBlocked("Missing required pitcher baseline fields for opponent in batter projections");
+  }
+
+  if (awayBatters.length === 0 && homeBatters.length === 0) {
+    return buildBlocked("Zero projectable batters on both teams");
   }
 
   return {
