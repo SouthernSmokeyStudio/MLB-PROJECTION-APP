@@ -638,7 +638,8 @@ export const loadLiveSlate = async (date: string): Promise<Result<LoadedLiveSlat
             ? buildPreparedStarterFromPeopleStats(
                 game.normalizedGame.away.probable_pitcher.player_id,
                 game.normalizedGame.away.team.team_id,
-                awayPitcherStats.data
+                awayPitcherStats.data,
+                game.normalizedGame.away.probable_pitcher.mlb_stats_api_id
               )
             : null;
 
@@ -647,7 +648,8 @@ export const loadLiveSlate = async (date: string): Promise<Result<LoadedLiveSlat
             ? buildPreparedStarterFromPeopleStats(
                 game.normalizedGame.home.probable_pitcher.player_id,
                 game.normalizedGame.home.team.team_id,
-                homePitcherStats.data
+                homePitcherStats.data,
+                game.normalizedGame.home.probable_pitcher.mlb_stats_api_id
               )
             : null;
 

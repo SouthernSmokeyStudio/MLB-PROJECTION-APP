@@ -134,7 +134,8 @@ export const joinDraftKingsClassicSalaries = ({
       );
     }
 
-    const matchedSalary = salaryByPlayerId.get(player.player_id);
+    const salaryJoinKey = player.mlb_stats_api_id ?? player.player_id;
+    const matchedSalary = salaryByPlayerId.get(salaryJoinKey);
 
     if (!matchedSalary) {
       return toHeldPlayer(

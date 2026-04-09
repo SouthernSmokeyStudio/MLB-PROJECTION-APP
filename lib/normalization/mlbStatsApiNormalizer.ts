@@ -332,6 +332,7 @@ const buildProbablePitcher = (
 
   return {
     player_id: asPlayerId(rawPlayerId),
+    mlb_stats_api_id: String(probablePitcher.id),
     starting_status: "probable",
     handedness: PITCHER_HANDEDNESS[probablePitcher.id] ?? "unknown"
   };

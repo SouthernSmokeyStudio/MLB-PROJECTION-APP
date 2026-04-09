@@ -40,6 +40,7 @@ const makeTeam = (id: string): PreparedTeamInputs => ({
 
 const makePitcher = (id: string, teamId: string): PreparedPitcherInputs => ({
   player_id: asPlayerId(id),
+  mlb_stats_api_id: id,
   team_id: asTeamId(teamId),
   handedness: "R",
   season_ip: 150,

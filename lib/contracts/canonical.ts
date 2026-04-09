@@ -60,6 +60,7 @@ export interface LineupEntry {
 
 export interface ProbablePitcher {
   readonly player_id: PlayerId;
+  readonly mlb_stats_api_id: string | null;
   readonly starting_status: StartingStatus;
   readonly handedness: Handedness;
 }

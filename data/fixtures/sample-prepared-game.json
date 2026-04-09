@@ -40,6 +40,7 @@
   },
   "away_starter": {
     "player_id": "gerrit-cole",
+    "mlb_stats_api_id": "543037",
     "team_id": "nyy",
     "handedness": "R",
     "season_ip": 182.1,
@@ -59,6 +60,7 @@
   },
   "home_starter": {
     "player_id": "chris-sale",
+    "mlb_stats_api_id": "519242",
     "team_id": "bos",
     "handedness": "L",
     "season_ip": 168.0,

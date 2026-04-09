@@ -14,6 +14,7 @@
     },
     "probable_pitcher": {
       "player_id": "gerrit-cole",
+      "mlb_stats_api_id": "543037",
       "starting_status": "confirmed",
       "handedness": "R"
     },
@@ -31,6 +32,7 @@
     },
     "probable_pitcher": {
       "player_id": "chris-sale",
+      "mlb_stats_api_id": "519242",
       "starting_status": "confirmed",
       "handedness": "L"
     },

@@ -11,6 +11,7 @@ import { simulateFantasy } from "@lib/simulation/simulateFantasy";
 
 export interface PlayerCard {
   readonly player_id: string;
+  readonly mlb_stats_api_id: string | null;
   readonly team_id: string;
   readonly game_id: string;
   readonly projection_lineage: ProjectionLineage;
@@ -135,6 +136,7 @@ const setDeterministicCandidate = (
 
   map.set(playerId, {
     player_id: playerId,
+    mlb_stats_api_id: existing?.mlb_stats_api_id ?? null,
     team_id: candidate.team_id as string,
     game_id: candidate.game_id as string,
     projection_lineage: projectionLineage,
@@ -212,6 +214,21 @@ export const buildPlayerCards = (
     projectionLineage
   );
 
+  // Attach mlb_stats_api_id from prepared pitcher inputs for DFS salary join
+  const pitcherMlbIds = new Map<string, string>();
+  if (preparedInputs.away_starter?.mlb_stats_api_id) {
+    pitcherMlbIds.set(preparedInputs.away_starter.player_id, preparedInputs.away_starter.mlb_stats_api_id);
+  }
+  if (preparedInputs.home_starter?.mlb_stats_api_id) {
+    pitcherMlbIds.set(preparedInputs.home_starter.player_id, preparedInputs.home_starter.mlb_stats_api_id);
+  }
+  for (const [playerId, card] of deterministicPlayers) {
+    const mlbId = pitcherMlbIds.get(playerId);
+    if (mlbId) {
+      deterministicPlayers.set(playerId, { ...card, mlb_stats_api_id: mlbId });
+    }
+  }
+
   const simulations = fantasy.blocked.is_blocked
     ? null
     : simulateFantasy(fantasy, options.simulation);
@@ -221,6 +238,7 @@ export const buildPlayerCards = (
 
     deterministicPlayers.set(player.player_id, {
       player_id: player.player_id,
+      mlb_stats_api_id: existing?.mlb_stats_api_id ?? null,
       team_id: player.team_id,
       game_id: player.game_id,
       projection_lineage: projectionLineage,
@@ -246,6 +264,7 @@ export const buildPlayerCards = (
 
     deterministicPlayers.set(player.player_id, {
       player_id: player.player_id,
+      mlb_stats_api_id: existing?.mlb_stats_api_id ?? null,
       team_id: player.team_id,
       game_id: player.game_id,
       projection_lineage: projectionLineage,

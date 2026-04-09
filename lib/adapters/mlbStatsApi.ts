@@ -586,6 +586,7 @@ const buildPreparedStarter = (
 
     starters.push({
       player_id: playerId,
+      mlb_stats_api_id: String(playerId),
       team_id: teamId,
       handedness: "unknown",
       // Provisional runtime fallback only: season innings pitched is sourced
@@ -692,7 +693,8 @@ export const fetchMlbStatsApiPitcherSeasonStats = async (
 export const buildPreparedStarterFromPeopleStats = (
   canonicalPlayerId: ReturnType<typeof asPlayerId>,
   teamId: PreparedTeamInputs["team_id"],
-  payload: unknown
+  payload: unknown,
+  mlbStatsApiId?: string | null
 ): PreparedPitcherInputs | null => {
   const payloadRecord = readNullableRecord(payload);
   const stats = payloadRecord && Array.isArray(payloadRecord.stats) ? payloadRecord.stats : null;
@@ -714,6 +716,7 @@ export const buildPreparedStarterFromPeopleStats = (
 
   return {
     player_id: canonicalPlayerId,
+    mlb_stats_api_id: mlbStatsApiId ?? null,
     team_id: teamId,
     handedness: "unknown",
     season_ip: seasonIp,

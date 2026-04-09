@@ -171,6 +171,7 @@ const buildFallbackPitcherInputs = (
 
   return {
     player_id: probablePitcher.player_id,
+    mlb_stats_api_id: probablePitcher.mlb_stats_api_id,
     team_id: teamId,
     handedness: probablePitcher.handedness,
     season_ip: null,

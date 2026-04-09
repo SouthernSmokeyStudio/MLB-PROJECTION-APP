@@ -23,6 +23,7 @@ export interface PreparedWeatherInputs {
 
 export interface PreparedPitcherInputs {
   readonly player_id: PlayerId;
+  readonly mlb_stats_api_id: string | null;
   readonly team_id: TeamId;
   readonly handedness: Handedness;
   readonly season_ip: number | null;

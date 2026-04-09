@@ -41,6 +41,7 @@
   "away_starter": null,
   "home_starter": {
     "player_id": "chris-sale",
+    "mlb_stats_api_id": "519242",
     "team_id": "nyy",
     "handedness": "L",
     "season_ip": 10,
