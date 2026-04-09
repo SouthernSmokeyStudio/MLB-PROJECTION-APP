@@ -1,8 +1,11 @@
 import type { MlbStatsApiScheduleGame } from "@lib/adapters/contracts";
 import {
+  buildPreparedStarterFromPeopleStats,
   extractPreparedGameDataFromBoxscore,
   fetchAndParseMlbStatsApiSchedule,
-  fetchMlbStatsApiBoxscore
+  fetchMlbStatsApiBoxscore,
+  fetchMlbStatsApiLinescore,
+  fetchMlbStatsApiPitcherSeasonStats
 } from "@lib/adapters/mlbStatsApi";
 import type { CanonicalGame } from "@lib/contracts/canonical";
 import type { PreparedGameInputs } from "@lib/contracts/prepared";
@@ -268,11 +271,22 @@ export interface LiveSlatePlayerIdentity {
   readonly batting_order: number | null;
 }
 
+export interface LiveSlateScoreState {
+  readonly away_score: number | null;
+  readonly home_score: number | null;
+  readonly inning_number: number | null;
+  readonly inning_state: "top" | "middle" | "bottom" | "end" | null;
+  readonly is_live: boolean;
+  readonly is_final: boolean;
+  readonly display_state: string | null;
+}
+
 export interface LiveSlateSourceGame {
   readonly parsedGame: MlbStatsApiScheduleGame;
   readonly canonicalGame: CanonicalGame;
   readonly preparedGame: PreparedGameInputs;
   readonly playerIdentities: Readonly<Record<string, LiveSlatePlayerIdentity>>;
+  readonly liveScoreState: LiveSlateScoreState;
 }
 
 export interface LiveSlateCounts {
@@ -425,6 +439,74 @@ const buildPlayerIdentityMap = (
   return identityMap;
 };
 
+const readBoxscoreTeamRuns = (
+  boxscore: unknown,
+  side: "away" | "home"
+): number | null => {
+  const boxscoreRecord = readNullableRecord(boxscore);
+  const teamBlock = readNullableRecord(readNullableRecord(boxscoreRecord?.teams)?.[side]);
+  const teamStats = readNullableRecord(teamBlock?.teamStats);
+  const batting = readNullableRecord(teamStats?.batting);
+
+  return readNullableNumber(batting?.runs);
+};
+
+const mapInningState = (
+  inningState: string | null
+): LiveSlateScoreState["inning_state"] => {
+  switch (inningState?.trim().toLowerCase()) {
+    case "top":
+      return "top";
+    case "middle":
+      return "middle";
+    case "bottom":
+      return "bottom";
+    case "end":
+      return "end";
+    default:
+      return null;
+  }
+};
+
+export const buildLiveSlateScoreState = ({
+  sourceGame,
+  boxscore,
+  linescore
+}: {
+  readonly sourceGame: NormalizedGameEntry;
+  readonly boxscore: unknown | null;
+  readonly linescore:
+    | {
+        readonly currentInning: number | null;
+        readonly currentInningOrdinal: string | null;
+        readonly inningState: string | null;
+        readonly teams: {
+          readonly away: { readonly runs: number | null };
+          readonly home: { readonly runs: number | null };
+        };
+      }
+    | null;
+}): LiveSlateScoreState => {
+  const status = sourceGame.normalizedGame.status;
+  const isLive = status === "in_progress";
+  const isFinal = status === "final";
+  const inningState = mapInningState(linescore?.inningState ?? null);
+  const inningOrdinal = linescore?.currentInningOrdinal?.trim() ?? null;
+
+  return {
+    away_score: linescore?.teams.away.runs ?? readBoxscoreTeamRuns(boxscore, "away"),
+    home_score: linescore?.teams.home.runs ?? readBoxscoreTeamRuns(boxscore, "home"),
+    inning_number: linescore?.currentInning ?? null,
+    inning_state: inningState,
+    is_live: isLive,
+    is_final: isFinal,
+    display_state:
+      isLive && inningState !== null && inningOrdinal
+        ? `${linescore?.inningState} ${inningOrdinal}`
+        : sourceGame.parsedGame.status.detailedState ?? null
+  };
+};
+
 export const getUtcDateString = (): string => new Date().toISOString().slice(0, 10);
 
 export const loadLiveSlate = async (date: string): Promise<Result<LoadedLiveSlate, string>> => {
@@ -490,9 +572,18 @@ export const loadLiveSlate = async (date: string): Promise<Result<LoadedLiveSlat
   let boxscoreEnriched = 0;
 
   for (const game of normalizedGames) {
-    const fetchedBoxscore = await fetchMlbStatsApiBoxscore(game.parsedGame.gamePk);
+    const [fetchedBoxscore, fetchedLinescore] = await Promise.all([
+      fetchMlbStatsApiBoxscore(game.parsedGame.gamePk),
+      fetchMlbStatsApiLinescore(game.parsedGame.gamePk)
+    ]);
     const boxscorePayload = fetchedBoxscore.success ? fetchedBoxscore.data : null;
+    const linescorePayload = fetchedLinescore.success ? fetchedLinescore.data : null;
     const playerIdentities = buildPlayerIdentityMap(game, boxscorePayload);
+    const liveScoreState = buildLiveSlateScoreState({
+      sourceGame: game,
+      boxscore: boxscorePayload,
+      linescore: linescorePayload
+    });
     let preparedGame = prepareGameInputs(game.normalizedGame);
 
     if (fetchedBoxscore.success) {
@@ -505,49 +596,81 @@ export const loadLiveSlate = async (date: string): Promise<Result<LoadedLiveSlat
         const season = game.parsedGame.gameDate.slice(0, 4);
         const awayTeamId = readNullableNumber(game.parsedGame.teams.away.team.id);
         const homeTeamId = readNullableNumber(game.parsedGame.teams.home.team.id);
+        const awayProbableNumericId =
+          extracted.data.away_starter === null
+            ? readNullableNumber(game.parsedGame.teams.away.probablePitcher?.id)
+            : null;
+        const homeProbableNumericId =
+          extracted.data.home_starter === null
+            ? readNullableNumber(game.parsedGame.teams.home.probablePitcher?.id)
+            : null;
 
-        if (awayTeamId !== null && homeTeamId !== null) {
-          const awaySeasonHitting = await fetchMlbStatsApiTeamSeasonHitting(
-            awayTeamId,
-            season
-          );
-          const homeSeasonHitting = await fetchMlbStatsApiTeamSeasonHitting(
-            homeTeamId,
-            season
-          );
-          const awayReliefPitching = await fetchMlbStatsApiTeamReliefPitching(
-            awayTeamId,
-            season
-          );
-          const homeReliefPitching = await fetchMlbStatsApiTeamReliefPitching(
-            homeTeamId,
-            season
-          );
+        const [
+          awaySeasonHitting,
+          homeSeasonHitting,
+          awayReliefPitching,
+          homeReliefPitching,
+          awayPitcherStats,
+          homePitcherStats
+        ] = await Promise.all([
+          awayTeamId !== null
+            ? fetchMlbStatsApiTeamSeasonHitting(awayTeamId, season)
+            : Promise.resolve({ success: false as const, error: "no away team id" }),
+          homeTeamId !== null
+            ? fetchMlbStatsApiTeamSeasonHitting(homeTeamId, season)
+            : Promise.resolve({ success: false as const, error: "no home team id" }),
+          awayTeamId !== null
+            ? fetchMlbStatsApiTeamReliefPitching(awayTeamId, season)
+            : Promise.resolve({ success: false as const, error: "no away team id" }),
+          homeTeamId !== null
+            ? fetchMlbStatsApiTeamReliefPitching(homeTeamId, season)
+            : Promise.resolve({ success: false as const, error: "no home team id" }),
+          awayProbableNumericId !== null
+            ? fetchMlbStatsApiPitcherSeasonStats(awayProbableNumericId, season)
+            : Promise.resolve({ success: false as const, error: "away starter already extracted" }),
+          homeProbableNumericId !== null
+            ? fetchMlbStatsApiPitcherSeasonStats(homeProbableNumericId, season)
+            : Promise.resolve({ success: false as const, error: "home starter already extracted" })
+        ]);
 
-          if (
-            awaySeasonHitting.success &&
-            homeSeasonHitting.success &&
-            awayReliefPitching.success &&
-            homeReliefPitching.success
-          ) {
-            const enrichedData: GamePreparationData = {
-              ...extracted.data,
-              away_team_season_hitting: awaySeasonHitting.data,
-              home_team_season_hitting: homeSeasonHitting.data,
-              away_team_relief_pitching: awayReliefPitching.data,
-              home_team_relief_pitching: homeReliefPitching.data
-            };
+        const awayStarterFromStats =
+          awayPitcherStats.success && game.normalizedGame.away.probable_pitcher !== null
+            ? buildPreparedStarterFromPeopleStats(
+                game.normalizedGame.away.probable_pitcher.player_id,
+                game.normalizedGame.away.team.team_id,
+                awayPitcherStats.data
+              )
+            : null;
 
-            preparedGame = prepareGameInputs(game.normalizedGame, enrichedData);
-            boxscoreEnriched++;
-          } else {
-            preparedGame = prepareGameInputs(game.normalizedGame, extracted.data);
-            boxscoreEnriched++;
-          }
-        } else {
-          preparedGame = prepareGameInputs(game.normalizedGame, extracted.data);
-          boxscoreEnriched++;
-        }
+        const homeStarterFromStats =
+          homePitcherStats.success && game.normalizedGame.home.probable_pitcher !== null
+            ? buildPreparedStarterFromPeopleStats(
+                game.normalizedGame.home.probable_pitcher.player_id,
+                game.normalizedGame.home.team.team_id,
+                homePitcherStats.data
+              )
+            : null;
+
+        const enrichedData: GamePreparationData = {
+          ...extracted.data,
+          away_starter: extracted.data.away_starter ?? awayStarterFromStats,
+          home_starter: extracted.data.home_starter ?? homeStarterFromStats,
+          ...(awaySeasonHitting.success
+            ? { away_team_season_hitting: awaySeasonHitting.data }
+            : {}),
+          ...(homeSeasonHitting.success
+            ? { home_team_season_hitting: homeSeasonHitting.data }
+            : {}),
+          ...(awayReliefPitching.success
+            ? { away_team_relief_pitching: awayReliefPitching.data }
+            : {}),
+          ...(homeReliefPitching.success
+            ? { home_team_relief_pitching: homeReliefPitching.data }
+            : {})
+        };
+
+        preparedGame = prepareGameInputs(game.normalizedGame, enrichedData);
+        boxscoreEnriched++;
       }
     }
 
@@ -555,7 +678,8 @@ export const loadLiveSlate = async (date: string): Promise<Result<LoadedLiveSlat
       parsedGame: game.parsedGame,
       canonicalGame: game.normalizedGame,
       preparedGame,
-      playerIdentities
+      playerIdentities,
+      liveScoreState
     });
   }
 

@@ -9,6 +9,7 @@ import type { GamePreparationData } from "@lib/preparation";
 import type {
   MlbStatsApiGameAdapter,
   MlbStatsApiGameStatus,
+  MlbStatsApiLinescore,
   MlbStatsApiProbablePitcher,
   MlbStatsApiScheduleGame,
   MlbStatsApiScheduleTeams,
@@ -19,6 +20,7 @@ import type {
 
 const MLB_STATS_API_SCHEDULE_ENDPOINT = "https://statsapi.mlb.com/api/v1/schedule";
 const MLB_STATS_API_GAME_ENDPOINT = "https://statsapi.mlb.com/api/v1/game";
+const MLB_STATS_API_PEOPLE_ENDPOINT = "https://statsapi.mlb.com/api/v1/people";
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
@@ -360,6 +362,65 @@ export const fetchMlbStatsApiBoxscore = async (gamePk: number): Promise<Result<u
   return ok(payload);
 };
 
+export const parseMlbStatsApiLinescorePayload = (
+  payload: unknown
+): Result<MlbStatsApiLinescore, string> => {
+  if (!isRecord(payload)) {
+    return err("MLB Stats API linescore payload must be an object");
+  }
+
+  const teams = readNullableRecord(payload.teams);
+  const away = readNullableRecord(teams?.away);
+  const home = readNullableRecord(teams?.home);
+
+  if (!teams || !away || !home) {
+    return err("MLB Stats API linescore payload missing teams block");
+  }
+
+  return ok({
+    currentInning: parseIntegerLike(payload.currentInning),
+    currentInningOrdinal: readNullableString(payload.currentInningOrdinal),
+    inningState: readNullableString(payload.inningState),
+    inningHalf: readNullableString(payload.inningHalf),
+    isTopInning:
+      typeof payload.isTopInning === "boolean" ? payload.isTopInning : null,
+    teams: {
+      away: {
+        runs: parseIntegerLike(away.runs)
+      },
+      home: {
+        runs: parseIntegerLike(home.runs)
+      }
+    }
+  });
+};
+
+export const fetchMlbStatsApiLinescore = async (
+  gamePk: number
+): Promise<Result<MlbStatsApiLinescore, string>> => {
+  const response = await fetch(`${MLB_STATS_API_GAME_ENDPOINT}/${gamePk}/linescore`, {
+    method: "GET",
+    headers: {
+      Accept: "application/json"
+    },
+    cache: "no-store"
+  });
+
+  if (!response.ok) {
+    return err(`MLB Stats API linescore request failed with status ${response.status}`);
+  }
+
+  let payload: unknown;
+
+  try {
+    payload = await response.json();
+  } catch {
+    return err("MLB Stats API linescore response was not valid JSON");
+  }
+
+  return parseMlbStatsApiLinescorePayload(payload);
+};
+
 export const fetchAndParseMlbStatsApiSchedule = async (
   date: string
 ): Promise<Result<{ rawGames: unknown[]; parsedGames: MlbStatsApiScheduleGame[] }, string>> => {
@@ -582,6 +643,94 @@ export const extractPreparedGameDataFromBoxscore = (
     away_batters: awayBatters,
     home_batters: homeBatters
   });
+};
+
+export const fetchMlbStatsApiPitcherSeasonStats = async (
+  numericPlayerId: number,
+  season: string
+): Promise<Result<unknown, string>> => {
+  const searchParams = new URLSearchParams({
+    stats: "season",
+    group: "pitching",
+    season,
+    gameType: "R"
+  });
+
+  const response = await fetch(
+    `${MLB_STATS_API_PEOPLE_ENDPOINT}/${numericPlayerId}/stats?${searchParams.toString()}`,
+    { method: "GET", headers: { Accept: "application/json" }, cache: "no-store" }
+  );
+
+  if (!response.ok) {
+    return err(`MLB Stats API pitcher season stats request failed with status ${response.status}`);
+  }
+
+  let payload: unknown;
+
+  try {
+    payload = await response.json();
+  } catch {
+    return err("MLB Stats API pitcher season stats response was not valid JSON");
+  }
+
+  if (!isRecord(payload)) {
+    return err("MLB Stats API pitcher season stats response must be an object");
+  }
+
+  const stats = Array.isArray(payload.stats) ? payload.stats : null;
+  const firstBlock = stats && stats.length > 0 ? readNullableRecord(stats[0]) : null;
+  const splits = firstBlock && Array.isArray(firstBlock.splits) ? firstBlock.splits : null;
+  const firstSplit = splits && splits.length > 0 ? readNullableRecord(splits[0]) : null;
+
+  if (!firstSplit || !readNullableRecord(firstSplit.stat)) {
+    return err(`MLB Stats API pitcher season stats for ${numericPlayerId} missing stat block`);
+  }
+
+  return ok(payload);
+};
+
+export const buildPreparedStarterFromPeopleStats = (
+  canonicalPlayerId: ReturnType<typeof asPlayerId>,
+  teamId: PreparedTeamInputs["team_id"],
+  payload: unknown
+): PreparedPitcherInputs | null => {
+  const payloadRecord = readNullableRecord(payload);
+  const stats = payloadRecord && Array.isArray(payloadRecord.stats) ? payloadRecord.stats : null;
+  const firstBlock = stats && stats.length > 0 ? readNullableRecord(stats[0]) : null;
+  const splits = firstBlock && Array.isArray(firstBlock.splits) ? firstBlock.splits : null;
+  const firstSplit = splits && splits.length > 0 ? readNullableRecord(splits[0]) : null;
+  const stat = firstSplit ? readNullableRecord(firstSplit.stat) : null;
+
+  if (!stat) {
+    return null;
+  }
+
+  const seasonIp = parseBaseballInnings(stat.inningsPitched);
+  const seasonGs = parseIntegerLike(stat.gamesStarted);
+  const recentIpPerStart =
+    seasonIp !== null && seasonGs !== null && seasonGs > 0
+      ? seasonIp / seasonGs
+      : null;
+
+  return {
+    player_id: canonicalPlayerId,
+    team_id: teamId,
+    handedness: "unknown",
+    season_ip: seasonIp,
+    season_era: parseNumericString(stat.era),
+    season_whip: parseNumericString(stat.whip),
+    season_k_per_9: parseNumericString(stat.strikeoutsPer9Inn),
+    season_bb_per_9: parseNumericString(stat.walksPer9Inn),
+    season_hr_per_9: parseNumericString(stat.homeRunsPer9),
+    recent_starts_n: null,
+    recent_era: null,
+    recent_k_per_9: null,
+    recent_ip_per_start: recentIpPerStart,
+    vs_lhb_era: null,
+    vs_rhb_era: null,
+    days_rest: null,
+    last_start_pitches: null
+  };
 };
 
 export const mlbStatsApiAdapter: MlbStatsApiGameAdapter = {
