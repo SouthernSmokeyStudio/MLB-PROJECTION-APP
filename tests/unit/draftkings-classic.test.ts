@@ -1,20 +1,25 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import rawFixture from "../../data/fixtures/sample-raw-game.json";
 import preparedFixture from "../../data/fixtures/sample-prepared-game.json";
 import type { DraftKingsClassicSalarySlate } from "../../lib/contracts/draftkings-classic";
 import type { PreparedGameInputs } from "../../lib/contracts/prepared";
 import { asISOTimestamp, asPlayerId } from "../../lib/contracts/types";
+import { parseMlbStatsApiGamePayload } from "../../lib/adapters/mlbStatsApi";
 import {
   fetchDraftKingsClassicSalarySlate,
   parseDraftKingsClassicSalarySlate
 } from "../../lib/adapters/draftKings";
+import { normalizeMlbStatsApiGame } from "../../lib/normalization/mlbStatsApiNormalizer";
 import { buildGameCard } from "../../lib/services/buildGameCard";
+import { buildDfsEdgeBoard } from "../../lib/services/buildDfsEdgeBoard";
 import {
   buildPlayerCards,
   type PlayerCard
 } from "../../lib/services/buildPlayerCard";
 import {
   buildDraftKingsClassicPlayerCards,
-  joinDraftKingsClassicSalaries
+  joinDraftKingsClassicSalaries,
+  normalizeNameForJoin
 } from "../../lib/services/joinDraftKingsClassicSalaries";
 
 const prepared = preparedFixture as unknown as PreparedGameInputs;
@@ -71,6 +76,38 @@ const makeSalarySlate = (
     position: index < 2 ? "SP" : "OF",
     roster_slot_id: index < 2 ? 110 : 200,
     salary: 5000 + index * 200,
+    team_abbreviation: index % 2 === 0 ? "NYY" : "BOS",
+    competition_id: "6157701",
+    competition_name: "NYY @ BOS",
+    competition_start: asISOTimestamp("2026-03-27T19:05:00Z")
+  }))
+});
+
+/**
+ * Build a salary slate with explicit display names for name-based fallback tests.
+ * Each entry gets a DK numeric player_id and the provided display_name.
+ */
+const makeSalarySlateWithNames = (
+  entries: readonly { displayName: string; salary?: number }[]
+): DraftKingsClassicSalarySlate => ({
+  provider: "draftkings",
+  contest_type: "classic",
+  draft_group_id: "145020",
+  source: {
+    provider: "draftkings",
+    endpoint: "https://api.draftkings.com/draftgroups/v1/draftgroups/145020/draftables?format=json",
+    fetched_at: asISOTimestamp("2026-04-06T17:00:00Z"),
+    raw_payload_hash: null
+  },
+  salaries: entries.map((entry, index) => ({
+    draftable_id: String(900000 + index),
+    player_id: asPlayerId(String(700000 + index)),   // DK numeric ID — never matches a slug
+    player_dk_id: String(800000 + index),
+    display_name: entry.displayName,
+    short_name: entry.displayName.split(" ").map((w, i) => i === 0 ? `${w[0]}.` : w).join(" "),
+    position: index < 2 ? "SP" : "OF",
+    roster_slot_id: index < 2 ? 110 : 200,
+    salary: entry.salary ?? 5000 + index * 200,
     team_abbreviation: index % 2 === 0 ? "NYY" : "BOS",
     competition_id: "6157701",
     competition_name: "NYY @ BOS",
@@ -467,5 +504,586 @@ describe("DraftKings Classic salary join", () => {
 
     expect(parsed.data.salaries).toHaveLength(1);
     expect(parsed.data.salaries[0]?.competition_name).toBe("DET @ MIN");
+  });
+
+  // ---------------------------------------------------------------------------
+  // Name-based fallback join (projected-tier DFS reconciliation repair)
+  // ---------------------------------------------------------------------------
+
+  describe("name-based fallback join", () => {
+    it("normalizeNameForJoin: slug and display name converge to same key", () => {
+      // Standard two-part name
+      expect(normalizeNameForJoin("gerrit-cole")).toBe("gerritcole");
+      expect(normalizeNameForJoin("Gerrit Cole")).toBe("gerritcole");
+
+      // Three-part hyphenated name
+      expect(normalizeNameForJoin("simeon-woods-richardson")).toBe("simeonwoodsrichardson");
+      expect(normalizeNameForJoin("Simeon Woods Richardson")).toBe("simeonwoodsrichardson");
+
+      // Periods in abbreviated names (A.J. Minter)
+      expect(normalizeNameForJoin("A.J. Minter")).toBe("ajminter");
+      expect(normalizeNameForJoin("a-j-minter")).toBe("ajminter");
+
+      // Jr. suffix
+      expect(normalizeNameForJoin("Ronald Acuña Jr.")).toBe("ronaldacunajr");
+      expect(normalizeNameForJoin("ronald-acuna-jr")).toBe("ronaldacunajr");
+
+      // Empty/whitespace → empty string
+      expect(normalizeNameForJoin("")).toBe("");
+      expect(normalizeNameForJoin("---")).toBe("");
+    });
+
+    it("projected slug player_id joins via name fallback when mlb_stats_api_id is null", () => {
+      const game = buildGameCard(prepared);
+      const realPlayers = buildPlayerCards(prepared).players;
+
+      const realPitcher = realPlayers.find((p) => p.deterministic_summary?.kind === "pitcher");
+      const realBatter = realPlayers.find((p) => p.deterministic_summary?.kind === "batter");
+      if (!realPitcher || !realBatter) {
+        throw new Error("Fixture must produce at least one pitcher and one batter");
+      }
+
+      // Simulate projected-tier output: slug player_id, null mlb_stats_api_id
+      const pitcher: PlayerCard = {
+        ...realPitcher,
+        player_id: "gerrit-cole",
+        mlb_stats_api_id: null
+      };
+      const batter: PlayerCard = {
+        ...realBatter,
+        player_id: "juan-soto",
+        mlb_stats_api_id: null
+      };
+
+      // DK salary slate with numeric player_ids and real display names
+      const salarySlate = makeSalarySlateWithNames([
+        { displayName: "Gerrit Cole", salary: 10200 },
+        { displayName: "Juan Soto", salary: 5800 }
+      ]);
+
+      const testGame: typeof game = {
+        ...game,
+        away_team_id: pitcher.team_id,
+        home_team_id: batter.team_id
+      };
+
+      const result = joinDraftKingsClassicSalaries({
+        game: testGame,
+        players: [pitcher, batter],
+        salary_slate: salarySlate
+      });
+
+      // Both should be ready via name fallback
+      expect(result.blocked.is_blocked).toBe(false);
+      expect(result.ready_players).toBe(2);
+      expect(result.held_players).toBe(0);
+
+      const joinedPitcher = result.players.find((p) => p.player_id === "gerrit-cole");
+      expect(joinedPitcher!.draftkings_classic.blocked.is_blocked).toBe(false);
+      expect(joinedPitcher!.fantasy_summary?.salary).toBe(10200);
+
+      const joinedBatter = result.players.find((p) => p.player_id === "juan-soto");
+      expect(joinedBatter!.draftkings_classic.blocked.is_blocked).toBe(false);
+      expect(joinedBatter!.fantasy_summary?.salary).toBe(5800);
+    });
+
+    it("periods and hyphens normalize correctly for abbreviated names", () => {
+      const game = buildGameCard(prepared);
+      const realPlayers = buildPlayerCards(prepared).players;
+
+      const realPitcher = realPlayers.find((p) => p.deterministic_summary?.kind === "pitcher");
+      if (!realPitcher) {
+        throw new Error("Fixture must produce at least one pitcher");
+      }
+
+      // "A.J. Minter" in DK display vs "a-j-minter" from Rotowire slug
+      const pitcher: PlayerCard = {
+        ...realPitcher,
+        player_id: "a-j-minter",
+        mlb_stats_api_id: null
+      };
+
+      const salarySlate = makeSalarySlateWithNames([
+        { displayName: "A.J. Minter", salary: 6500 }
+      ]);
+
+      const testGame: typeof game = {
+        ...game,
+        away_team_id: pitcher.team_id,
+        home_team_id: pitcher.team_id
+      };
+
+      const result = joinDraftKingsClassicSalaries({
+        game: testGame,
+        players: [pitcher],
+        salary_slate: salarySlate
+      });
+
+      expect(result.ready_players).toBe(1);
+      expect(result.held_players).toBe(0);
+
+      const joined = result.players[0];
+      expect(joined!.draftkings_classic.blocked.is_blocked).toBe(false);
+      expect(joined!.fantasy_summary?.salary).toBe(6500);
+    });
+
+    it("no-match stays held when neither ID nor name matches", () => {
+      const game = buildGameCard(prepared);
+      const realPlayers = buildPlayerCards(prepared).players;
+
+      const realPitcher = realPlayers.find((p) => p.deterministic_summary?.kind === "pitcher");
+      if (!realPitcher) {
+        throw new Error("Fixture must produce at least one pitcher");
+      }
+
+      // Player slug that doesn't match any DK display_name
+      const pitcher: PlayerCard = {
+        ...realPitcher,
+        player_id: "nonexistent-player",
+        mlb_stats_api_id: null
+      };
+
+      const salarySlate = makeSalarySlateWithNames([
+        { displayName: "Gerrit Cole", salary: 10200 }
+      ]);
+
+      const testGame: typeof game = {
+        ...game,
+        away_team_id: pitcher.team_id,
+        home_team_id: pitcher.team_id
+      };
+
+      const result = joinDraftKingsClassicSalaries({
+        game: testGame,
+        players: [pitcher],
+        salary_slate: salarySlate
+      });
+
+      expect(result.ready_players).toBe(0);
+      expect(result.held_players).toBe(1);
+
+      const held = result.players[0];
+      expect(held!.draftkings_classic.blocked.is_blocked).toBe(true);
+      expect(held!.fantasy_summary?.salary).toBeNull();
+    });
+
+    it("primary ID join takes precedence over name fallback", () => {
+      const game = buildGameCard(prepared);
+      const realPlayers = buildPlayerCards(prepared).players;
+
+      const realPitcher = realPlayers.find((p) => p.deterministic_summary?.kind === "pitcher");
+      if (!realPitcher) {
+        throw new Error("Fixture must produce at least one pitcher");
+      }
+
+      // Player has mlb_stats_api_id that matches a DK player_id directly
+      const pitcher: PlayerCard = {
+        ...realPitcher,
+        player_id: "gerrit-cole",
+        mlb_stats_api_id: "543037"
+      };
+
+      // Salary slate with numeric ID "543037" at salary 10200,
+      // and display_name "Gerrit Cole" at a DIFFERENT salary (8000)
+      const salarySlate: DraftKingsClassicSalarySlate = {
+        provider: "draftkings",
+        contest_type: "classic",
+        draft_group_id: "145020",
+        source: {
+          provider: "draftkings",
+          endpoint: "https://api.draftkings.com/draftgroups/v1/draftgroups/145020/draftables?format=json",
+          fetched_at: asISOTimestamp("2026-04-06T17:00:00Z"),
+          raw_payload_hash: null
+        },
+        salaries: [
+          {
+            draftable_id: "900001",
+            player_id: asPlayerId("543037"),
+            player_dk_id: "800001",
+            display_name: "Different Player",
+            short_name: "D. Player",
+            position: "SP",
+            roster_slot_id: 110,
+            salary: 10200,
+            team_abbreviation: "NYY",
+            competition_id: "6157701",
+            competition_name: "NYY @ BOS",
+            competition_start: asISOTimestamp("2026-03-27T19:05:00Z")
+          },
+          {
+            draftable_id: "900002",
+            player_id: asPlayerId("999999"),
+            player_dk_id: "800002",
+            display_name: "Gerrit Cole",
+            short_name: "G. Cole",
+            position: "SP",
+            roster_slot_id: 110,
+            salary: 8000,
+            team_abbreviation: "NYY",
+            competition_id: "6157701",
+            competition_name: "NYY @ BOS",
+            competition_start: asISOTimestamp("2026-03-27T19:05:00Z")
+          }
+        ]
+      };
+
+      const testGame: typeof game = {
+        ...game,
+        away_team_id: pitcher.team_id,
+        home_team_id: pitcher.team_id
+      };
+
+      const result = joinDraftKingsClassicSalaries({
+        game: testGame,
+        players: [pitcher],
+        salary_slate: salarySlate
+      });
+
+      // Should match via mlb_stats_api_id → "543037" → salary 10200 (NOT the name match at 8000)
+      expect(result.ready_players).toBe(1);
+      const joined = result.players[0];
+      expect(joined!.fantasy_summary?.salary).toBe(10200);
+    });
+
+    it("join-level proof: projected-tier pitchers with slug player_id and null mlb_stats_api_id produce ready_players > 0", () => {
+      const playerCards = buildPlayerCards(prepared).players;
+
+      // Fixture pitchers have unique slug player_ids ("gerrit-cole", "chris-sale").
+      // Fixture batters have stub IDs ("nyy-1", "bos-1") which are NOT unique names —
+      // "nyy-1" through "nyy-9" all normalize to "nyy" → correctly flagged ambiguous.
+      // This test proves the projected-tier pitcher path: slug + null mlb_stats_api_id → name match.
+      const pitcherCards = playerCards.filter(
+        (p) => p.deterministic_summary?.kind === "pitcher"
+      );
+      expect(pitcherCards.length).toBeGreaterThanOrEqual(2);
+
+      const projectedPitchers = pitcherCards.map((p) => ({
+        ...p,
+        mlb_stats_api_id: null
+      }));
+
+      const salarySlate = makeSalarySlateWithNames(
+        projectedPitchers.map((p) => ({
+          displayName: p.player_id
+            .split("-")
+            .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+            .join(" ")
+        }))
+      );
+
+      const game = buildGameCard(prepared);
+      const result = joinDraftKingsClassicSalaries({
+        game,
+        players: projectedPitchers,
+        salary_slate: salarySlate
+      });
+
+      expect(result.ready_players).toBe(projectedPitchers.length);
+      expect(result.held_players).toBe(0);
+      expect(result.blocked.is_blocked).toBe(false);
+
+      for (const player of result.players) {
+        expect(player.draftkings_classic.blocked.is_blocked).toBe(false);
+        expect(player.fantasy_summary?.salary).not.toBeNull();
+      }
+    });
+
+    it("ambiguous name key holds the player instead of matching the wrong salary", () => {
+      const game = buildGameCard(prepared);
+      const realPlayers = buildPlayerCards(prepared).players;
+
+      const realPitcher = realPlayers.find((p) => p.deterministic_summary?.kind === "pitcher");
+      if (!realPitcher) {
+        throw new Error("Fixture must produce at least one pitcher");
+      }
+
+      // Projected-tier pitcher with slug player_id, no mlb_stats_api_id
+      const pitcher: PlayerCard = {
+        ...realPitcher,
+        player_id: "chris-martin",
+        mlb_stats_api_id: null
+      };
+
+      // Two DK salary entries that normalize to the same name → ambiguous
+      const salarySlate = makeSalarySlateWithNames([
+        { displayName: "Chris Martin", salary: 6000 },
+        { displayName: "Chris Martin", salary: 7500 }
+      ]);
+
+      const testGame: typeof game = {
+        ...game,
+        away_team_id: pitcher.team_id,
+        home_team_id: pitcher.team_id
+      };
+
+      const result = joinDraftKingsClassicSalaries({
+        game: testGame,
+        players: [pitcher],
+        salary_slate: salarySlate
+      });
+
+      // Must be HELD — not matched to either ambiguous entry
+      expect(result.ready_players).toBe(0);
+      expect(result.held_players).toBe(1);
+
+      const held = result.players[0];
+      expect(held!.draftkings_classic.blocked.is_blocked).toBe(true);
+      expect(held!.fantasy_summary?.salary).toBeNull();
+    });
+
+    it("primary ID join bypasses ambiguous name fallback", () => {
+      const game = buildGameCard(prepared);
+      const realPlayers = buildPlayerCards(prepared).players;
+
+      const realPitcher = realPlayers.find((p) => p.deterministic_summary?.kind === "pitcher");
+      if (!realPitcher) {
+        throw new Error("Fixture must produce at least one pitcher");
+      }
+
+      // Pitcher has a direct mlb_stats_api_id match — should succeed even if name is ambiguous
+      const pitcher: PlayerCard = {
+        ...realPitcher,
+        player_id: "chris-martin",
+        mlb_stats_api_id: "700000"    // matches first DK entry's player_id from makeSalarySlateWithNames
+      };
+
+      // Two DK entries normalize to same name → ambiguous, but primary ID join should win
+      const salarySlate = makeSalarySlateWithNames([
+        { displayName: "Chris Martin", salary: 6000 },
+        { displayName: "Chris Martin", salary: 7500 }
+      ]);
+
+      const testGame: typeof game = {
+        ...game,
+        away_team_id: pitcher.team_id,
+        home_team_id: pitcher.team_id
+      };
+
+      const result = joinDraftKingsClassicSalaries({
+        game: testGame,
+        players: [pitcher],
+        salary_slate: salarySlate
+      });
+
+      // Primary ID join wins — matched to first entry at salary 6000
+      expect(result.ready_players).toBe(1);
+      expect(result.held_players).toBe(0);
+
+      const joined = result.players[0];
+      expect(joined!.draftkings_classic.blocked.is_blocked).toBe(false);
+      expect(joined!.fantasy_summary?.salary).toBe(6000);
+    });
+
+    it("unambiguous name among other entries still matches", () => {
+      const game = buildGameCard(prepared);
+      const realPlayers = buildPlayerCards(prepared).players;
+
+      const realPitcher = realPlayers.find((p) => p.deterministic_summary?.kind === "pitcher");
+      const realBatter = realPlayers.find((p) => p.deterministic_summary?.kind === "batter");
+      if (!realPitcher || !realBatter) {
+        throw new Error("Fixture must produce at least one pitcher and one batter");
+      }
+
+      // Two players: one with ambiguous name, one with unique name
+      const ambiguousPlayer: PlayerCard = {
+        ...realPitcher,
+        player_id: "chris-martin",
+        mlb_stats_api_id: null
+      };
+      const uniquePlayer: PlayerCard = {
+        ...realBatter,
+        player_id: "juan-soto",
+        mlb_stats_api_id: null
+      };
+
+      const salarySlate = makeSalarySlateWithNames([
+        { displayName: "Chris Martin", salary: 6000 },
+        { displayName: "Chris Martin", salary: 7500 },
+        { displayName: "Juan Soto", salary: 5800 }
+      ]);
+
+      const testGame: typeof game = {
+        ...game,
+        away_team_id: ambiguousPlayer.team_id,
+        home_team_id: uniquePlayer.team_id
+      };
+
+      const result = joinDraftKingsClassicSalaries({
+        game: testGame,
+        players: [ambiguousPlayer, uniquePlayer],
+        salary_slate: salarySlate
+      });
+
+      // Ambiguous player held, unique player ready
+      expect(result.ready_players).toBe(1);
+      expect(result.held_players).toBe(1);
+
+      const heldPlayer = result.players.find((p) => p.player_id === "chris-martin");
+      expect(heldPlayer!.draftkings_classic.blocked.is_blocked).toBe(true);
+
+      const readyPlayer = result.players.find((p) => p.player_id === "juan-soto");
+      expect(readyPlayer!.draftkings_classic.blocked.is_blocked).toBe(false);
+      expect(readyPlayer!.fantasy_summary?.salary).toBe(5800);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // DFS board-level proof: counts.matched_salaries
+  // ---------------------------------------------------------------------------
+
+  describe("DFS board-level proof", () => {
+    // Build a LiveSlateSourceGame from the existing fixtures
+    const parsedResult = parseMlbStatsApiGamePayload(rawFixture);
+    if (!parsedResult.success) {
+      throw new Error(parsedResult.error);
+    }
+    const normalizedResult = normalizeMlbStatsApiGame(parsedResult.data);
+    if (!normalizedResult.success) {
+      throw new Error(normalizedResult.error);
+    }
+
+    const sourceGame = {
+      parsedGame: parsedResult.data,
+      canonicalGame: normalizedResult.data,
+      preparedGame: prepared,
+      liveScoreState: {
+        away_score: null,
+        home_score: null,
+        inning_number: null,
+        inning_state: null as "top" | "middle" | "bottom" | "end" | null,
+        is_live: false,
+        is_final: false,
+        display_state: "Scheduled"
+      },
+      playerIdentities: {}
+    };
+
+    const boardOptions = {
+      source: "test",
+      date: "2026-04-06",
+      generated_at: "2026-04-06T17:00:00Z",
+      counts: {
+        fetched_raw: 1,
+        parsed: 1,
+        normalized: 1,
+        prepared: 1,
+        boxscore_enriched: 0
+      },
+      draftkings_classic: {
+        draft_group_id: "145020",
+        label: "Main",
+        min_start_time: "2026-04-06T19:05:00Z",
+        max_start_time: "2026-04-06T23:10:00Z",
+        tags: ["mlb-main"]
+      }
+    };
+
+    it("projected-tier name fallback lifts counts.matched_salaries above 0", () => {
+      const playerCards = buildPlayerCards(prepared).players;
+      const pitcherCards = playerCards.filter(
+        (p) => p.deterministic_summary?.kind === "pitcher"
+      );
+      const batterCards = playerCards.filter(
+        (p) => p.deterministic_summary?.kind === "batter"
+      );
+      expect(pitcherCards.length).toBeGreaterThanOrEqual(2);
+
+      // Construct a hybrid salary slate that proves BOTH join paths:
+      //  - Pitchers: DK numeric player_id (won't primary-match slug) + real display name → name fallback
+      //  - Batters: DK player_id set to match batter's player_id → primary join
+      // This mirrors the real projected-tier shape: pitchers from Rotowire (slug IDs),
+      // batters still matched via primary ID from existing sources.
+      const allEntries = [
+        ...pitcherCards.map((p) => ({
+          displayName: p.player_id
+            .split("-")
+            .map((w: string) => w.charAt(0).toUpperCase() + w.slice(1))
+            .join(" ")
+        })),
+        ...batterCards.map((p) => ({
+          displayName: `Batter ${p.player_id}`  // won't name-match; relies on primary ID
+        }))
+      ];
+
+      const salarySlate = makeSalarySlateWithNames(allEntries);
+
+      // Override batter entries' DK player_id to match their actual player_id (primary join)
+      const hybridSalarySlate: DraftKingsClassicSalarySlate = {
+        ...salarySlate,
+        salaries: salarySlate.salaries.map((entry, i) => {
+          if (i < pitcherCards.length) return entry; // pitcher: keep DK numeric ID → name fallback
+          return { ...entry, player_id: asPlayerId(batterCards[i - pitcherCards.length]!.player_id) };
+        })
+      };
+
+      const board = buildDfsEdgeBoard([sourceGame], {
+        ...boardOptions,
+        salary_slate: hybridSalarySlate
+      });
+
+      // THE critical assertion: counts.matched_salaries > 0 at the public summary layer
+      expect(board.counts.matched_salaries).toBeGreaterThan(0);
+      // Pitchers matched via name fallback + batters matched via primary ID = all players
+      expect(board.counts.matched_salaries).toBe(playerCards.length);
+      expect(board.summary.ready_players).toBe(playerCards.length);
+    });
+
+    it("ambiguous name entries produce held players and lower matched_salaries count", () => {
+      const playerCards = buildPlayerCards(prepared).players;
+      const pitcherCards = playerCards.filter(
+        (p) => p.deterministic_summary?.kind === "pitcher"
+      );
+      const batterCards = playerCards.filter(
+        (p) => p.deterministic_summary?.kind === "batter"
+      );
+      expect(pitcherCards.length).toBeGreaterThanOrEqual(2);
+
+      // Use first pitcher's display name for TWO DK entries → ambiguous key
+      const firstPitcher = pitcherCards[0]!;
+      const ambiguousDisplayName = firstPitcher.player_id
+        .split("-")
+        .map((w: string) => w.charAt(0).toUpperCase() + w.slice(1))
+        .join(" ");
+
+      // Build entries: pitchers get real names, batters get unique non-matching names
+      const pitcherEntries = pitcherCards.map((p) => ({
+        displayName: p.player_id
+          .split("-")
+          .map((w: string) => w.charAt(0).toUpperCase() + w.slice(1))
+          .join(" ")
+      }));
+      const batterEntries = batterCards.map((p) => ({
+        displayName: `Batter ${p.player_id}`
+      }));
+      // Add duplicate that makes first pitcher's name ambiguous
+      const duplicateEntry = { displayName: ambiguousDisplayName };
+
+      const salarySlate = makeSalarySlateWithNames([
+        ...pitcherEntries,
+        ...batterEntries,
+        duplicateEntry
+      ]);
+
+      // Override batter entries' DK player_id to match (primary join)
+      const hybridSalarySlate: DraftKingsClassicSalarySlate = {
+        ...salarySlate,
+        salaries: salarySlate.salaries.map((entry, i) => {
+          if (i < pitcherCards.length) return entry; // pitcher entries
+          if (i >= pitcherCards.length + batterCards.length) return entry; // duplicate entry
+          return { ...entry, player_id: asPlayerId(batterCards[i - pitcherCards.length]!.player_id) };
+        })
+      };
+
+      const board = buildDfsEdgeBoard([sourceGame], {
+        ...boardOptions,
+        salary_slate: hybridSalarySlate
+      });
+
+      // First pitcher held (ambiguous name), rest matched
+      // matched_salaries should be less than total players
+      expect(board.counts.matched_salaries).toBeLessThan(playerCards.length);
+      expect(board.counts.matched_salaries).toBe(playerCards.length - 1);
+      expect(board.summary.held_players).toBeGreaterThan(0);
+    });
   });
 });

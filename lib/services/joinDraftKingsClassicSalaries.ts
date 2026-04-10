@@ -30,6 +30,21 @@ export interface DraftKingsClassicPlayerCardsResult {
   readonly players: readonly DraftKingsClassicPlayerCard[];
 }
 
+/**
+ * Normalize a name to a lowercase alpha-only key for deterministic
+ * name-based join fallback. Strips all non-letter characters so that
+ * slug format ("gerrit-cole"), display format ("Gerrit Cole"), and
+ * abbreviated format ("A.J. Minter" / "a-j-minter") all converge.
+ *
+ * Used only when the primary ID join (mlb_stats_api_id / player_id) misses.
+ */
+export const normalizeNameForJoin = (name: string): string =>
+  name
+    .normalize("NFD")                    // decompose diacritics (ñ → n + combining tilde)
+    .replace(/[\u0300-\u036f]/g, "")     // strip combining marks
+    .replace(/[^a-zA-Z]/g, "")           // strip everything except ASCII letters
+    .toLowerCase();
+
 const deriveDraftKingsClassicValue = (
   projectedPoints: number,
   salary: number
@@ -117,6 +132,28 @@ export const joinDraftKingsClassicSalaries = ({
     salary_slate.salaries.map((salaryEntry) => [String(salaryEntry.player_id), salaryEntry] as const)
   );
 
+  // Secondary name-based index for projected-tier fallback.
+  // When a player comes from the projected tier (Rotowire), mlb_stats_api_id is null
+  // and player_id is a slug ("gerrit-cole") that cannot match DK numeric IDs.
+  // This index lets the join fall back to matching the slug against DK display_name.
+  //
+  // Ambiguity guard: if two or more DK entries normalize to the same name key,
+  // mark that key as ambiguous (null). The fallback will not use ambiguous keys —
+  // the player stays held rather than risk matching the wrong salary entry.
+  const AMBIGUOUS_SENTINEL = null;
+  const salaryByNormalizedName = new Map<string, typeof salary_slate.salaries[number] | null>();
+  for (const entry of salary_slate.salaries) {
+    const key = normalizeNameForJoin(entry.display_name);
+    if (!key) {
+      continue;
+    }
+    if (salaryByNormalizedName.has(key)) {
+      salaryByNormalizedName.set(key, AMBIGUOUS_SENTINEL);
+    } else {
+      salaryByNormalizedName.set(key, entry);
+    }
+  }
+
   const joinedPlayers = players.map<DraftKingsClassicPlayerCard>((player) => {
     if (player.blocked.is_blocked) {
       return toHeldPlayer(
@@ -135,7 +172,8 @@ export const joinDraftKingsClassicSalaries = ({
     }
 
     const salaryJoinKey = player.mlb_stats_api_id ?? player.player_id;
-    const matchedSalary = salaryByPlayerId.get(salaryJoinKey);
+    const matchedSalary = salaryByPlayerId.get(salaryJoinKey)
+      ?? salaryByNormalizedName.get(normalizeNameForJoin(player.player_id));
 
     if (!matchedSalary) {
       return toHeldPlayer(
