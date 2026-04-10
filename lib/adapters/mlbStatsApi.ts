@@ -17,6 +17,7 @@ import type {
   MlbStatsApiTeamSide,
   MlbStatsApiVenue
 } from "./contracts";
+import { fetchWithTimeout } from "./fetchWithTimeout";
 
 const MLB_STATS_API_SCHEDULE_ENDPOINT = "https://statsapi.mlb.com/api/v1/schedule";
 const MLB_STATS_API_GAME_ENDPOINT = "https://statsapi.mlb.com/api/v1/game";
@@ -289,13 +290,17 @@ export const fetchMlbStatsApiSchedule = async (date: string): Promise<Result<unk
     date
   });
 
-  const response = await fetch(`${MLB_STATS_API_SCHEDULE_ENDPOINT}?${searchParams.toString()}`, {
+  const { response, error: fetchError } = await fetchWithTimeout(`${MLB_STATS_API_SCHEDULE_ENDPOINT}?${searchParams.toString()}`, {
     method: "GET",
     headers: {
       Accept: "application/json"
     },
     cache: "no-store"
   });
+
+  if (!response) {
+    return err(`MLB Stats API schedule ${fetchError}`);
+  }
 
   if (!response.ok) {
     return err(`MLB Stats API schedule request failed with status ${response.status}`);
@@ -335,13 +340,17 @@ export const fetchMlbStatsApiSchedule = async (date: string): Promise<Result<unk
 };
 
 export const fetchMlbStatsApiBoxscore = async (gamePk: number): Promise<Result<unknown, string>> => {
-  const response = await fetch(`${MLB_STATS_API_GAME_ENDPOINT}/${gamePk}/boxscore`, {
+  const { response, error: fetchError } = await fetchWithTimeout(`${MLB_STATS_API_GAME_ENDPOINT}/${gamePk}/boxscore`, {
     method: "GET",
     headers: {
       Accept: "application/json"
     },
     cache: "no-store"
   });
+
+  if (!response) {
+    return err(`MLB Stats API boxscore ${fetchError}`);
+  }
 
   if (!response.ok) {
     return err(`MLB Stats API boxscore request failed with status ${response.status}`);
@@ -398,13 +407,17 @@ export const parseMlbStatsApiLinescorePayload = (
 export const fetchMlbStatsApiLinescore = async (
   gamePk: number
 ): Promise<Result<MlbStatsApiLinescore, string>> => {
-  const response = await fetch(`${MLB_STATS_API_GAME_ENDPOINT}/${gamePk}/linescore`, {
+  const { response, error: fetchError } = await fetchWithTimeout(`${MLB_STATS_API_GAME_ENDPOINT}/${gamePk}/linescore`, {
     method: "GET",
     headers: {
       Accept: "application/json"
     },
     cache: "no-store"
   });
+
+  if (!response) {
+    return err(`MLB Stats API linescore ${fetchError}`);
+  }
 
   if (!response.ok) {
     return err(`MLB Stats API linescore request failed with status ${response.status}`);
@@ -657,10 +670,14 @@ export const fetchMlbStatsApiPitcherSeasonStats = async (
     gameType: "R"
   });
 
-  const response = await fetch(
+  const { response, error: fetchError } = await fetchWithTimeout(
     `${MLB_STATS_API_PEOPLE_ENDPOINT}/${numericPlayerId}/stats?${searchParams.toString()}`,
     { method: "GET", headers: { Accept: "application/json" }, cache: "no-store" }
   );
+
+  if (!response) {
+    return err(`MLB Stats API pitcher season stats ${fetchError}`);
+  }
 
   if (!response.ok) {
     return err(`MLB Stats API pitcher season stats request failed with status ${response.status}`);

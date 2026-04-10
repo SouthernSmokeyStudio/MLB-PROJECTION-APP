@@ -3,6 +3,7 @@ import type {
   DraftKingsSportsbookMlbMoneylineSlate
 } from "@lib/contracts/draftkings-sportsbook-mlb-moneyline";
 import { asISOTimestamp, err, ok, type ISOTimestamp, type Result } from "@lib/contracts/types";
+import { fetchWithTimeout } from "./fetchWithTimeout";
 
 const DRAFTKINGS_SPORTSBOOK_API_HOST = "https://sportsbook-nash.draftkings.com";
 const DRAFTKINGS_SPORTSBOOK_SITE = "US-TN-SB" as const;
@@ -292,13 +293,17 @@ export const fetchDraftKingsSportsbookMlbMoneylineSlate = async (): Promise<
 > => {
   const endpoint = buildDraftKingsSportsbookMlbMoneylineEndpoint();
   const fetchedAt = asISOTimestamp(new Date().toISOString());
-  const response = await fetch(endpoint, {
+  const { response, error: fetchError } = await fetchWithTimeout(endpoint, {
     method: "GET",
     headers: {
       Accept: "application/json"
     },
     cache: "no-store"
   });
+
+  if (!response) {
+    return err(`DraftKings Sportsbook MLB moneyline ${fetchError}`);
+  }
 
   if (!response.ok) {
     return err(

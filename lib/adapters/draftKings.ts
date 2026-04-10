@@ -10,6 +10,7 @@ import {
   type ISOTimestamp,
   type Result
 } from "@lib/contracts/types";
+import { fetchWithTimeout } from "./fetchWithTimeout";
 
 const DRAFTKINGS_API_HOST = "https://api.draftkings.com";
 
@@ -285,13 +286,17 @@ export const fetchUpcomingDraftKingsClassicDraftGroups = async (): Promise<
 > => {
   const endpoint =
     `${DRAFTKINGS_API_HOST}/sites/US-DK/draftgroups/v3/draftgroups?states=upcoming&format=json`;
-  const response = await fetch(endpoint, {
+  const { response, error: fetchError } = await fetchWithTimeout(endpoint, {
     method: "GET",
     headers: {
       Accept: "application/json"
     },
     cache: "no-store"
   });
+
+  if (!response) {
+    return err(`DraftKings Classic draft group ${fetchError}`);
+  }
 
   if (!response.ok) {
     return err(`DraftKings Classic draft group request failed with status ${response.status}`);
@@ -313,13 +318,17 @@ export const fetchDraftKingsClassicSalarySlate = async (
 ): Promise<Result<DraftKingsClassicSalarySlate, string>> => {
   const fetchedAt = asISOTimestamp(new Date().toISOString());
   const endpoint = `${DRAFTKINGS_API_HOST}/draftgroups/v1/draftgroups/${draftGroupId}/draftables?format=json`;
-  const response = await fetch(endpoint, {
+  const { response, error: fetchError } = await fetchWithTimeout(endpoint, {
     method: "GET",
     headers: {
       Accept: "application/json"
     },
     cache: "no-store"
   });
+
+  if (!response) {
+    return err(`DraftKings Classic salary ${fetchError}`);
+  }
 
   if (!response.ok) {
     return err(`DraftKings Classic salary request failed with status ${response.status}`);

@@ -1,4 +1,5 @@
 import type { MlbStatsApiScheduleGame } from "@lib/adapters/contracts";
+import { fetchWithTimeout } from "@lib/adapters/fetchWithTimeout";
 import {
   buildPreparedStarterFromPeopleStats,
   extractPreparedGameDataFromBoxscore,
@@ -141,13 +142,20 @@ const fetchMlbStatsApiJsonObject = async (
   url: string,
   label: string
 ): Promise<JsonObjectResult> => {
-  const response = await fetch(url, {
+  const { response, error: fetchError } = await fetchWithTimeout(url, {
     method: "GET",
     headers: {
       Accept: "application/json"
     },
     cache: "no-store"
   });
+
+  if (!response) {
+    return {
+      success: false,
+      error: `${label} ${fetchError}`
+    };
+  }
 
   if (!response.ok) {
     return {
