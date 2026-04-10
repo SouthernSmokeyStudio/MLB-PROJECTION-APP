@@ -329,10 +329,10 @@ describe("/api/slate-snapshot route", () => {
     expect(publication.is_complete).toBe(false);
   });
 
-  it("returns a 502 when the live slate loader fails", async () => {
+  it("returns a degraded 200 snapshot when the live slate loader fails", async () => {
     vi.mocked(loadLiveSlate).mockResolvedValue({
       success: false,
-      error: "live slate failed"
+      error: "MLB Stats API schedule request timed out after 15000ms"
     });
     vi.mocked(loadDraftKingsClassicSlate).mockResolvedValue({
       success: true,
@@ -362,9 +362,88 @@ describe("/api/slate-snapshot route", () => {
     );
     const payload = (await response.json()) as Record<string, unknown>;
 
-    expect(response.status).toBe(502);
+    // Route returns 200, not 502
+    expect(response.status).toBe(200);
+
+    // Valid snapshot shape
+    expect(payload.mode).toBe("slate-snapshot-v1");
     expect(payload.source).toBe("mlb-statsapi-live");
-    expect(payload.error).toBe("live slate failed");
+
+    // Schedule and player_projections are blocked with the MLB error
+    const schedule = payload.schedule as Record<string, unknown>;
+    const playerProjections = payload.player_projections as Record<string, unknown>;
+    expect((schedule.status as Record<string, unknown>).state).toBe("blocked");
+    expect((schedule.status as Record<string, unknown>).reason).toContain(
+      "MLB Stats API schedule request timed out"
+    );
+    expect((playerProjections.status as Record<string, unknown>).state).toBe("blocked");
+    expect((playerProjections.status as Record<string, unknown>).reason).toContain(
+      "MLB Stats API schedule request timed out"
+    );
+
+    // No fake games emitted
+    const schedulePayload = schedule.payload as Record<string, unknown>;
+    expect((schedulePayload.games as unknown[]).length).toBe(0);
+
+    // DFS and betting edge are blocked (no games to join against)
+    const dfsEdge = payload.dfs_edge as Record<string, unknown>;
+    const bettingEdge = payload.betting_edge as Record<string, unknown>;
+    expect((dfsEdge.status as Record<string, unknown>).state).toBe("blocked");
+    expect((dfsEdge.status as Record<string, unknown>).reason).toContain(
+      "MLB schedule unavailable"
+    );
+    expect((bettingEdge.status as Record<string, unknown>).state).toBe("blocked");
+    expect((bettingEdge.status as Record<string, unknown>).reason).toContain(
+      "MLB schedule unavailable"
+    );
+
+    // Publication is incomplete
+    const publication = payload.publication as Record<string, unknown>;
+    expect(publication.is_complete).toBe(false);
+    expect(publication.blocked_sections).toContain("schedule");
+    expect(publication.blocked_sections).toContain("player_projections");
+    expect(publication.blocked_sections).toContain("dfs_edge");
+    expect(publication.blocked_sections).toContain("betting_edge");
+
+    // Counts reflect zero games
+    const counts = payload.counts as Record<string, unknown>;
+    expect(counts.fetched_raw).toBe(0);
+    expect(counts.parsed).toBe(0);
+    expect(counts.normalized).toBe(0);
+    expect(counts.prepared).toBe(0);
+    expect(counts.boxscore_enriched).toBe(0);
+  });
+
+  it("degraded MLB snapshot passes round-trip validation through parseSlateSnapshotPayload", async () => {
+    vi.mocked(loadLiveSlate).mockResolvedValue({
+      success: false,
+      error: "MLB Stats API schedule request failed with status 503"
+    });
+    vi.mocked(loadDraftKingsClassicSlate).mockResolvedValue({
+      success: false,
+      error: "DraftKings Classic draft group request timed out after 15000ms"
+    });
+    vi.mocked(loadDraftKingsSportsbookMlbMoneylineSlate).mockResolvedValue({
+      success: false,
+      error: "DraftKings Sportsbook MLB moneyline request timed out after 15000ms"
+    });
+
+    const response = await GET(
+      new NextRequest("http://localhost/api/slate-snapshot?date=2026-03-27")
+    );
+
+    expect(response.status).toBe(200);
+    const rawPayload = await response.json();
+
+    // Schema lock: degraded output must also pass the validator
+    expect(() => parseSlateSnapshotPayload(rawPayload)).not.toThrow();
+
+    const validated = parseSlateSnapshotPayload(rawPayload);
+    expect(validated.mode).toBe("slate-snapshot-v1");
+    expect(validated.version).toBe(1);
+    expect(validated.schedule.status.state).toBe("blocked");
+    expect(validated.schedule.payload?.games).toHaveLength(0);
+    expect(validated.publication.is_complete).toBe(false);
   });
 
   it("returns a snapshot that passes round-trip validation through parseSlateSnapshotPayload", async () => {

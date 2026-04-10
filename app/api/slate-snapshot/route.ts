@@ -36,17 +36,16 @@ export async function GET(request: NextRequest): Promise<Response> {
     loadDraftKingsSportsbookMlbMoneylineSlate({ date })
   ]);
 
-  if (!loadedLiveSlate.success) {
-    return NextResponse.json(
-      {
-        source: SNAPSHOT_SOURCE,
-        error: loadedLiveSlate.error
-      },
-      { status: 502 }
-    );
-  }
+  const liveNote = loadedLiveSlate.success ? loadedLiveSlate.data.note : null;
+  const mlbError = loadedLiveSlate.success ? null : loadedLiveSlate.error;
+  const sourceGames = loadedLiveSlate.success ? loadedLiveSlate.data.games : [];
+  const generatedAt = loadedLiveSlate.success
+    ? loadedLiveSlate.data.generated_at
+    : new Date().toISOString();
+  const counts = loadedLiveSlate.success
+    ? loadedLiveSlate.data.counts
+    : { fetched_raw: 0, parsed: 0, normalized: 0, prepared: 0, boxscore_enriched: 0 };
 
-  const liveNote = loadedLiveSlate.data.note;
   const dfsEdgeReason = !loadedDraftKingsSlate.success
     ? loadedDraftKingsSlate.error
     : loadedDraftKingsSlate.data.note;
@@ -55,27 +54,35 @@ export async function GET(request: NextRequest): Promise<Response> {
     : loadedMoneylineSlate.data.note;
 
   return NextResponse.json(
-    buildSlateSnapshot(loadedLiveSlate.data.games, {
+    buildSlateSnapshot(sourceGames, {
       source: SNAPSHOT_SOURCE,
       date,
-      generated_at: loadedLiveSlate.data.generated_at,
-      counts: loadedLiveSlate.data.counts,
+      generated_at: generatedAt,
+      counts,
       simulation: DEFAULT_SIMULATION,
       schedule: {
-        source: loadedLiveSlate.data.source,
-        note: liveNote
+        source: loadedLiveSlate.success ? loadedLiveSlate.data.source : SNAPSHOT_SOURCE,
+        note: mlbError ?? liveNote
       },
       player_projections: {
-        source: loadedLiveSlate.data.source,
-        note: liveNote
+        source: loadedLiveSlate.success ? loadedLiveSlate.data.source : SNAPSHOT_SOURCE,
+        note: mlbError ?? liveNote
       },
+      ...(mlbError
+        ? {
+            schedule_reason: mlbError,
+            player_projections_reason: mlbError
+          }
+        : {}),
       ...(!loadedDraftKingsSlate.success ||
       !loadedDraftKingsSlate.data.draft_group ||
-      !loadedDraftKingsSlate.data.salary_slate
+      !loadedDraftKingsSlate.data.salary_slate ||
+      mlbError
         ? {
-            dfs_edge_reason:
-              dfsEdgeReason ??
-              "No DraftKings Classic salary slate matched the requested date."
+            dfs_edge_reason: mlbError
+              ? `MLB schedule unavailable — cannot build DFS edge: ${mlbError}`
+              : dfsEdgeReason ??
+                "No DraftKings Classic salary slate matched the requested date."
           }
         : {
             dfs_edge: {
@@ -91,11 +98,12 @@ export async function GET(request: NextRequest): Promise<Response> {
               salary_slate: loadedDraftKingsSlate.data.salary_slate
             }
           }),
-      ...(!loadedMoneylineSlate.success || !loadedMoneylineSlate.data.moneyline_slate
+      ...(!loadedMoneylineSlate.success || !loadedMoneylineSlate.data.moneyline_slate || mlbError
         ? {
-            betting_edge_reason:
-              bettingEdgeReason ??
-              "No DraftKings Sportsbook MLB pregame moneyline rows matched the requested date."
+            betting_edge_reason: mlbError
+              ? `MLB schedule unavailable — cannot build betting edge: ${mlbError}`
+              : bettingEdgeReason ??
+                "No DraftKings Sportsbook MLB pregame moneyline rows matched the requested date."
           }
         : {
             betting_edge: {

@@ -49,6 +49,8 @@ export interface BuildSlateSnapshotOptions {
     readonly note?: string | null;
   };
   readonly betting_edge_reason?: string;
+  readonly schedule_reason?: string;
+  readonly player_projections_reason?: string;
   readonly smoke_signal_reason?: string;
   readonly live_scoreboard_reason?: string;
 }
@@ -169,24 +171,34 @@ export const buildSlateSnapshot = (
     ...(simulationOptions ? { simulation: simulationOptions } : {})
   });
 
-  const schedule = wrapSection(
-    schedulePayload,
-    buildStatus(
-      schedulePayload.games.length === 0 ? "empty" : "ready",
-      schedulePayload.games.length === 0
-        ? schedulePayload.note ?? "Schedule has no wrapped games."
-        : null
-    )
-  );
-  const playerProjections = wrapSection(
-    playerPayload,
-    buildStatus(
-      playerPayload.players.length === 0 ? "empty" : "ready",
-      playerPayload.players.length === 0
-        ? playerPayload.note ?? "Player Projections has no wrapped rows."
-        : null
-    )
-  );
+  const schedule = options.schedule_reason
+    ? wrapSection(
+        schedulePayload,
+        buildStatus("blocked", options.schedule_reason)
+      )
+    : wrapSection(
+        schedulePayload,
+        buildStatus(
+          schedulePayload.games.length === 0 ? "empty" : "ready",
+          schedulePayload.games.length === 0
+            ? schedulePayload.note ?? "Schedule has no wrapped games."
+            : null
+        )
+      );
+  const playerProjections = options.player_projections_reason
+    ? wrapSection(
+        playerPayload,
+        buildStatus("blocked", options.player_projections_reason)
+      )
+    : wrapSection(
+        playerPayload,
+        buildStatus(
+          playerPayload.players.length === 0 ? "empty" : "ready",
+          playerPayload.players.length === 0
+            ? playerPayload.note ?? "Player Projections has no wrapped rows."
+            : null
+        )
+      );
 
   const dfsEdge = options.dfs_edge
     ? (() => {
