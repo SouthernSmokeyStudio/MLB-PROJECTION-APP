@@ -75,10 +75,6 @@ const computeWeatherRunFactor = (inputs: PreparedGameInputs): number => {
 };
 
 export const projectTeamRuns = (inputs: PreparedGameInputs): TeamRunsProjectionResult => {
-  if (inputs.blocked.is_blocked) {
-    return buildBlocked(inputs.blocked.blocked_reason ?? "Prepared inputs are blocked");
-  }
-
   if (!inputs.away_starter || !inputs.home_starter) {
     return buildBlocked("Both starting pitchers are required for team run projections");
   }

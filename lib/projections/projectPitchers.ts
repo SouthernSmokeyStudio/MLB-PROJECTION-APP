@@ -109,10 +109,6 @@ const buildPitcherProjection = (
 };
 
 export const projectPitchers = (inputs: PreparedGameInputs): PitcherProjectionResult => {
-  if (inputs.blocked.is_blocked) {
-    return buildBlocked(inputs.blocked.blocked_reason ?? "Prepared inputs are blocked");
-  }
-
   if (!inputs.away_starter || !inputs.home_starter) {
     return buildBlocked("Both starting pitchers are required for baseline pitcher projections");
   }

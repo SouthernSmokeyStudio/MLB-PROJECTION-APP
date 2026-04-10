@@ -38,6 +38,10 @@ export const checkPreparedGameInvariants = (inputs: PreparedGameInputs): readonl
     results.push(createCheckResult("invariant.prepared_game", false, "error", "prepared_input", inputs.game_id, "has_both_lineups flag mismatch"));
   }
 
+  if (inputs.team_level_ready && !inputs.has_both_starters) {
+    results.push(createCheckResult("invariant.prepared_game", false, "error", "prepared_input", inputs.game_id, "team_level_ready requires has_both_starters"));
+  }
+
   if (inputs.completeness_score < 0 || inputs.completeness_score > 1) {
     results.push(createCheckResult("invariant.prepared_game", false, "error", "prepared_input", inputs.game_id, "completeness_score must be between 0 and 1"));
   }

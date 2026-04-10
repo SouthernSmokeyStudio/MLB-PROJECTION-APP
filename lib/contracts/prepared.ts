@@ -91,6 +91,7 @@ export interface PreparedGameInputs {
   readonly away_batters: readonly PreparedBatterInputs[];
   readonly home_batters: readonly PreparedBatterInputs[];
   readonly blocked: BlockedState;
+  readonly team_level_ready: boolean;
   readonly has_both_starters: boolean;
   readonly has_both_lineups: boolean;
   readonly completeness_score: number;

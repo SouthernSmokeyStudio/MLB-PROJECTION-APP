@@ -68,6 +68,7 @@
     "is_blocked": true,
     "blocked_reason": null
   },
+  "team_level_ready": false,
   "has_both_starters": false,
   "has_both_lineups": false,
   "completeness_score": 1.5

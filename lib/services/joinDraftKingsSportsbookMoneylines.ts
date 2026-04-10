@@ -133,19 +133,13 @@ export const joinDraftKingsSportsbookMoneylines = ({
       ...(options.simulation ? { simulation: options.simulation } : {})
     });
 
-    if (game.blocked.is_blocked) {
-      return buildHeldGameRow({
-        sourceGame,
-        game,
-        reason: game.blocked.blocked_reason ?? "Upstream game projection is blocked"
-      });
-    }
-
     if (!game.simulation) {
       return buildHeldGameRow({
         sourceGame,
         game,
-        reason: "DraftKings Sportsbook moneyline join requires a simulation-backed game row"
+        reason: !sourceGame.preparedGame.team_level_ready
+          ? (game.blocked.blocked_reason ?? "Team-level inputs insufficient for simulation")
+          : "DraftKings Sportsbook moneyline join requires a simulation-backed game row"
       });
     }
 

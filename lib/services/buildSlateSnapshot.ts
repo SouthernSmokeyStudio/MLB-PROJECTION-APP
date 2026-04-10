@@ -1,6 +1,7 @@
 import type { BettingEdgeBoardPayload } from "@lib/contracts/betting-edge-board";
 import type { DfsEdgeBoardPayload } from "@lib/contracts/dfs-edge-board";
 import type { LiveScoreboardPayload } from "@lib/contracts/live-scoreboard";
+import type { PlayerBoardPayload } from "@lib/contracts/player-board";
 import type { SmokeSignalPayload } from "@lib/contracts/smoke-signal";
 import type {
   SlateSnapshotPayload,
@@ -148,6 +149,23 @@ const buildSmokeSignalStatus = (
   return buildStatus("ready");
 };
 
+const buildPlayerProjectionsStatus = (
+  payload: PlayerBoardPayload
+): SlateSnapshotSectionStatus => {
+  if (payload.players.length === 0) {
+    return buildStatus("empty", payload.note ?? "Player Projections has no wrapped rows.");
+  }
+
+  if (payload.summary.projected_players > 0) {
+    return buildStatus("ready");
+  }
+
+  return buildStatus(
+    "partial",
+    payload.note ?? "Player rows exist but none are projectable yet."
+  );
+};
+
 export const buildSlateSnapshot = (
   sourceGames: readonly LiveSlateSourceGame[],
   options: BuildSlateSnapshotOptions
@@ -192,12 +210,7 @@ export const buildSlateSnapshot = (
       )
     : wrapSection(
         playerPayload,
-        buildStatus(
-          playerPayload.players.length === 0 ? "empty" : "ready",
-          playerPayload.players.length === 0
-            ? playerPayload.note ?? "Player Projections has no wrapped rows."
-            : null
-        )
+        buildPlayerProjectionsStatus(playerPayload)
       );
 
   const dfsEdge = options.dfs_edge

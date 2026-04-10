@@ -200,7 +200,8 @@ const createPreparedGame = (
   homeStarter: PreparedPitcherInputs | null,
   awayBatters: readonly PreparedBatterInputs[],
   homeBatters: readonly PreparedBatterInputs[],
-  reasons: readonly string[]
+  reasons: readonly string[],
+  teamLevelReady: boolean
 ): PreparedGameInputs => {
   const hasBothStarters = awayStarter != null && homeStarter != null;
   const hasBothLineups = awayBatters.length > 0 && homeBatters.length > 0;
@@ -238,6 +239,7 @@ const createPreparedGame = (
       is_blocked: reasons.length > 0,
       blocked_reason: reasons.length > 0 ? reasons.join("; ") : null
     },
+    team_level_ready: teamLevelReady,
     has_both_starters: hasBothStarters,
     has_both_lineups: hasBothLineups,
     completeness_score: completenessScore
@@ -305,5 +307,22 @@ export const prepareGameInputs = (
     reasons.push("home_starter player_id does not match canonical probable pitcher");
   }
 
-  return createPreparedGame(game, preparedAt, awayTeam, homeTeam, awayStarter, homeStarter, awayBatters, homeBatters, reasons);
+  // team_level_ready mirrors projectTeamRuns's own requirements (starters,
+  // team aggregate stats, venue) without referencing batter arrays.  mapVenue
+  // already falls back park_factor_runs to 1.0 when the canonical venue exists
+  // but lacks a sourced park factor, so game.venue !== null is sufficient.
+  const teamLevelReady =
+    awayStarter !== null &&
+    homeStarter !== null &&
+    awayStarter.season_era !== null &&
+    homeStarter.season_era !== null &&
+    awayTeam.team_runs_per_game !== null &&
+    awayTeam.team_woba !== null &&
+    homeTeam.team_runs_per_game !== null &&
+    homeTeam.team_woba !== null &&
+    awayTeam.bullpen_era !== null &&
+    homeTeam.bullpen_era !== null &&
+    game.venue !== null;
+
+  return createPreparedGame(game, preparedAt, awayTeam, homeTeam, awayStarter, homeStarter, awayBatters, homeBatters, reasons, teamLevelReady);
 };

@@ -107,6 +107,7 @@ const makeSyntheticInputs = (overrides: Partial<PreparedGameInputs> = {}): Prepa
   away_batters: makeFullLineup("team-away"),
   home_batters: makeFullLineup("team-home"),
   blocked: { is_blocked: false, blocked_reason: null },
+  team_level_ready: true,
   has_both_starters: true,
   has_both_lineups: true,
   completeness_score: 1.0,

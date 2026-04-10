@@ -76,6 +76,7 @@ const readBlockedState = (
   gameProjection: AssembledGameProjection["game_projection"]
 ): BlockedState => gameProjection.metadata.blocked ?? preparedInputs.blocked;
 
+
 export const buildGameCard = (
   preparedInputs: PreparedGameInputs,
   options: BuildGameCardOptions = {}
@@ -89,9 +90,19 @@ export const buildGameCard = (
     metadata: gameProjection.metadata
   });
 
-  const simulations = blocked.is_blocked
-    ? null
-    : simulateGames(gameProjection, options.simulation);
+  // When team_level_ready is true, strip the metadata.blocked from the game
+  // projection before passing to simulateGames.  The combined metadata.blocked
+  // includes batter-level reasons that are irrelevant for team-level simulation.
+  const simulations = preparedInputs.team_level_ready
+    ? simulateGames(
+        {
+          away: gameProjection.away,
+          home: gameProjection.home,
+          projected_total: gameProjection.projected_total
+        },
+        options.simulation
+      )
+    : null;
 
   const moneyline = options.market?.moneyline && simulations
     ? {
@@ -136,11 +147,11 @@ export const buildGameCard = (
     projection_lineage: projectionLineage,
     deterministic: {
       derived_from: "deterministic",
-      projected_away_runs: blocked.is_blocked ? null : gameProjection.away.projected_runs,
-      projected_home_runs: blocked.is_blocked ? null : gameProjection.home.projected_runs,
-      projected_total: blocked.is_blocked ? null : gameProjection.projected_total,
-      away_pitcher: blocked.is_blocked ? null : assembled.away_pitcher,
-      home_pitcher: blocked.is_blocked ? null : assembled.home_pitcher
+      projected_away_runs: preparedInputs.team_level_ready ? gameProjection.away.projected_runs : null,
+      projected_home_runs: preparedInputs.team_level_ready ? gameProjection.home.projected_runs : null,
+      projected_total: preparedInputs.team_level_ready ? gameProjection.projected_total : null,
+      away_pitcher: preparedInputs.team_level_ready ? assembled.away_pitcher : null,
+      home_pitcher: preparedInputs.team_level_ready ? assembled.home_pitcher : null
     },
     simulation: simulations
       ? {
