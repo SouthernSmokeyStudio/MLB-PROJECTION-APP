@@ -20,3 +20,4 @@ export * from "./slate-snapshot";
 export * from "./materialized-slate";
 export * from "./projected-source";
 export * from "./inferred-source";
+export * from "./merge-law";
