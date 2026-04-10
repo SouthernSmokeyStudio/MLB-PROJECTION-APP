@@ -7,6 +7,9 @@
  *
  * Also proves that loadLiveSlate itself rejects stale baselines
  * at its own boundary — independent of the route guard.
+ *
+ * A6 addition: proves that the merge-wiring in loadLiveSlate does not
+ * change behavior when no projected/inferred data is supplied.
  */
 
 import { describe, expect, it, vi } from "vitest";
@@ -121,5 +124,92 @@ describe("loadLiveSlate — stale baseline rejection at load boundary", () => {
     expect(withStale.data.games).toEqual(withoutBaseline.data.games);
     expect(withStale.data.counts).toEqual(withoutBaseline.data.counts);
     expect(withStale.data.note).toBe(withoutBaseline.data.note);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 3. A6 merge-wiring equivalence: official-only path unchanged
+// ---------------------------------------------------------------------------
+
+describe("loadLiveSlate — merge-wiring does not change official-only behavior", () => {
+  it("loadLiveSlate(date) === loadLiveSlate(date, { projectedGames: undefined, inferredGames: undefined }) on empty schedule", async () => {
+    vi.mocked(fetchAndParseMlbStatsApiSchedule).mockResolvedValue({
+      success: true,
+      data: { rawGames: [], parsedGames: [] }
+    } as never);
+
+    const bare = await loadLiveSlate("2026-04-10");
+    const explicit = await loadLiveSlate("2026-04-10", {
+      projectedGames: undefined,
+      inferredGames: undefined
+    });
+
+    expect(bare.success).toBe(true);
+    expect(explicit.success).toBe(true);
+
+    if (!bare.success || !explicit.success) {
+      throw new Error("Both calls should succeed");
+    }
+
+    expect(bare.data.source).toBe(explicit.data.source);
+    expect(bare.data.date).toBe(explicit.data.date);
+    expect(bare.data.counts).toEqual(explicit.data.counts);
+    expect(bare.data.note).toBe(explicit.data.note);
+    expect(bare.data.games).toEqual(explicit.data.games);
+    expect(bare.data.games).toHaveLength(0);
+  });
+
+  it("loadLiveSlate(date) === loadLiveSlate(date, { projectedGames: empty Map, inferredGames: empty Map }) on empty schedule", async () => {
+    vi.mocked(fetchAndParseMlbStatsApiSchedule).mockResolvedValue({
+      success: true,
+      data: { rawGames: [], parsedGames: [] }
+    } as never);
+
+    const bare = await loadLiveSlate("2026-04-10");
+    const withEmptyMaps = await loadLiveSlate("2026-04-10", {
+      projectedGames: new Map(),
+      inferredGames: new Map()
+    });
+
+    expect(bare.success).toBe(true);
+    expect(withEmptyMaps.success).toBe(true);
+
+    if (!bare.success || !withEmptyMaps.success) {
+      throw new Error("Both calls should succeed");
+    }
+
+    expect(bare.data.source).toBe(withEmptyMaps.data.source);
+    expect(bare.data.date).toBe(withEmptyMaps.data.date);
+    expect(bare.data.counts).toEqual(withEmptyMaps.data.counts);
+    expect(bare.data.note).toBe(withEmptyMaps.data.note);
+    expect(bare.data.games).toEqual(withEmptyMaps.data.games);
+  });
+
+  it("all three variants produce identical results on fetch failure", async () => {
+    vi.mocked(fetchAndParseMlbStatsApiSchedule).mockResolvedValue({
+      success: false,
+      error: "Upstream unavailable"
+    } as never);
+
+    const bare = await loadLiveSlate("2026-04-10");
+    const explicitUndefined = await loadLiveSlate("2026-04-10", {
+      projectedGames: undefined,
+      inferredGames: undefined
+    });
+    const emptyMaps = await loadLiveSlate("2026-04-10", {
+      projectedGames: new Map(),
+      inferredGames: new Map()
+    });
+
+    expect(bare.success).toBe(false);
+    expect(explicitUndefined.success).toBe(false);
+    expect(emptyMaps.success).toBe(false);
+
+    if (bare.success || explicitUndefined.success || emptyMaps.success) {
+      throw new Error("All calls should fail");
+    }
+
+    expect(bare.error).toBe(explicitUndefined.error);
+    expect(bare.error).toBe(emptyMaps.error);
   });
 });

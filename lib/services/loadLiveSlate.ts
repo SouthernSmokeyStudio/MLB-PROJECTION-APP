@@ -14,14 +14,18 @@ import {
   asPlayerId,
   err,
   ok,
+  type GameId,
   type PlayerId,
   type PlayerPosition,
   type Result
 } from "@lib/contracts/types";
 import type { MaterializedSlate } from "@lib/contracts/materialized-slate";
+import type { ProjectedGameData } from "@lib/contracts/projected-source";
+import type { InferredGameData } from "@lib/contracts/inferred-source";
 import { normalizeMlbStatsApiGame } from "@lib/normalization/mlbStatsApiNormalizer";
 import type { GamePreparationData } from "@lib/preparation";
 import { prepareGameInputs } from "@lib/preparation";
+import { resolveGameSources, applyMergedStartersToCanonical } from "@lib/merge";
 
 const MLB_STATS_API_TEAM_ENDPOINT = "https://statsapi.mlb.com/api/v1/teams";
 
@@ -520,6 +524,18 @@ export const getUtcDateString = (): string => new Date().toISOString().slice(0, 
 
 export interface LoadLiveSlateOptions {
   readonly materializedBaseline?: MaterializedSlate | undefined;
+  /**
+   * Optional projected game data keyed by game_id.
+   * When provided, the merge law (official > projected > inferred) determines
+   * which starter identity feeds preparation.  When absent, official-only
+   * behavior is preserved — zero change from the pre-merge path.
+   */
+  readonly projectedGames?: ReadonlyMap<GameId, ProjectedGameData> | undefined;
+  /**
+   * Optional inferred game data keyed by game_id.
+   * Same merge semantics as projectedGames.
+   */
+  readonly inferredGames?: ReadonlyMap<GameId, InferredGameData> | undefined;
 }
 
 /** Artifacts older than this threshold are rejected at the load boundary. */
@@ -617,13 +633,22 @@ export const loadLiveSlate = async (
       boxscore: boxscorePayload,
       linescore: linescorePayload
     });
+    // --------------- Source tier merge (A6) ---------------
+    // Resolve which starter identity wins per the three-tier merge law.
+    // When no projected/inferred data is provided, mergedCanonical is the
+    // original canonicalGame — zero behavioral change from the pre-merge path.
+    const projectedForGame = options?.projectedGames?.get(game.normalizedGame.game_id) ?? null;
+    const inferredForGame = options?.inferredGames?.get(game.normalizedGame.game_id) ?? null;
+    const merged = resolveGameSources(game.normalizedGame, projectedForGame, inferredForGame);
+    const mergedCanonical = applyMergedStartersToCanonical(game.normalizedGame, merged);
+
     // When a materialized baseline has a matching game, use it as the
     // initial preparedGame.  If live boxscore enrichment succeeds below,
     // it fully overrides this with fresh data.  When no baseline match
     // exists, this is identical to the pre-A2 path.
     let preparedGame =
       materializedLookup.get(game.normalizedGame.game_id) ??
-      prepareGameInputs(game.normalizedGame);
+      prepareGameInputs(mergedCanonical);
 
     if (fetchedBoxscore.success) {
       const extracted = extractPreparedGameDataFromBoxscore(
@@ -672,23 +697,25 @@ export const loadLiveSlate = async (
             : Promise.resolve({ success: false as const, error: "home starter already extracted" })
         ]);
 
+        // Use mergedCanonical for starter identity: when a non-official tier
+        // won the merge, mergedCanonical.probable_pitcher reflects that winner.
         const awayStarterFromStats =
-          awayPitcherStats.success && game.normalizedGame.away.probable_pitcher !== null
+          awayPitcherStats.success && mergedCanonical.away.probable_pitcher !== null
             ? buildPreparedStarterFromPeopleStats(
-                game.normalizedGame.away.probable_pitcher.player_id,
-                game.normalizedGame.away.team.team_id,
+                mergedCanonical.away.probable_pitcher.player_id,
+                mergedCanonical.away.team.team_id,
                 awayPitcherStats.data,
-                game.normalizedGame.away.probable_pitcher.mlb_stats_api_id
+                mergedCanonical.away.probable_pitcher.mlb_stats_api_id
               )
             : null;
 
         const homeStarterFromStats =
-          homePitcherStats.success && game.normalizedGame.home.probable_pitcher !== null
+          homePitcherStats.success && mergedCanonical.home.probable_pitcher !== null
             ? buildPreparedStarterFromPeopleStats(
-                game.normalizedGame.home.probable_pitcher.player_id,
-                game.normalizedGame.home.team.team_id,
+                mergedCanonical.home.probable_pitcher.player_id,
+                mergedCanonical.home.team.team_id,
                 homePitcherStats.data,
-                game.normalizedGame.home.probable_pitcher.mlb_stats_api_id
+                mergedCanonical.home.probable_pitcher.mlb_stats_api_id
               )
             : null;
 
@@ -710,7 +737,7 @@ export const loadLiveSlate = async (
             : {})
         };
 
-        preparedGame = prepareGameInputs(game.normalizedGame, enrichedData);
+        preparedGame = prepareGameInputs(mergedCanonical, enrichedData);
         boxscoreEnriched++;
       }
     }
