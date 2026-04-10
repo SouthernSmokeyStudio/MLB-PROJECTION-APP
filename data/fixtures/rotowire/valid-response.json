@@ -1,0 +1,39 @@
+[
+  {
+    "away_team": "NYY",
+    "home_team": "BOS",
+    "game_date": "2026-04-10",
+    "away_starter": {
+      "name": "Gerrit Cole",
+      "hand": "R",
+      "status": "confirmed"
+    },
+    "home_starter": {
+      "name": "Chris Sale",
+      "hand": "L",
+      "status": "expected"
+    },
+    "away_lineup": [
+      { "name": "Aaron Judge", "batting_order": 1, "position": "RF", "hand": "R" },
+      { "name": "Juan Soto", "batting_order": 2, "position": "LF", "hand": "L" },
+      { "name": "Anthony Rizzo", "batting_order": 3, "position": "1B", "hand": "L" }
+    ],
+    "home_lineup": [
+      { "name": "Jarren Duran", "batting_order": 1, "position": "CF", "hand": "L" },
+      { "name": "Rafael Devers", "batting_order": 2, "position": "3B", "hand": "L" }
+    ]
+  },
+  {
+    "away_team": "LAD",
+    "home_team": "SF",
+    "game_date": "2026-04-10",
+    "away_starter": {
+      "name": "Clayton Kershaw",
+      "hand": "L",
+      "status": "probable"
+    },
+    "home_starter": null,
+    "away_lineup": null,
+    "home_lineup": null
+  }
+]

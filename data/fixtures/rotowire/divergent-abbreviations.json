@@ -1,0 +1,28 @@
+[
+  {
+    "away_team": "WAS",
+    "home_team": "SFG",
+    "game_date": "2026-04-10",
+    "away_starter": {
+      "name": "Patrick Corbin",
+      "hand": "L",
+      "status": "expected"
+    },
+    "home_starter": {
+      "name": "Logan Webb",
+      "hand": "R",
+      "status": "confirmed"
+    },
+    "away_lineup": null,
+    "home_lineup": null
+  },
+  {
+    "away_team": "TBR",
+    "home_team": "KCR",
+    "game_date": "2026-04-10",
+    "away_starter": null,
+    "home_starter": null,
+    "away_lineup": null,
+    "home_lineup": null
+  }
+]

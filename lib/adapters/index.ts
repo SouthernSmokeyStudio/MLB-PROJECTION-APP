@@ -3,3 +3,4 @@ export * from "./mlbStatsApi";
 export * from "./draftKings";
 export * from "./draftKingsSportsbook";
 export * from "./testProjectedSource";
+export * from "./rotowireProjectedSource";
