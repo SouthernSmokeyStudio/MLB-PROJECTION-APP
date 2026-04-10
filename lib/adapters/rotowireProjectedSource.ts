@@ -15,14 +15,15 @@
  * - All provider-specific parsing is isolated inside this adapter.
  * - The endpoint URL is configurable (injected at construction time),
  *   so the adapter can be pointed at any Rotowire-compatible feed
- *   (official API, licensed data proxy, or local fixture file).
+ *   (official page, licensed data proxy, or local fixture file).
  * - No Rotowire-specific types or field names leak past the adapter
  *   boundary into canonical contracts.
  *
  * Provider response shape (expected):
- * The adapter expects a JSON array of game objects from the provider.
- * Each game object has Rotowire-specific field names that are normalized
- * at the adapter boundary.  See parseRotowirePayload for the exact shape.
+ * The adapter expects an HTML page from Rotowire's daily lineups page.
+ * Each game card is a <div class="lineup is-mlb"> with team abbreviations,
+ * pitcher highlights, lineup status, and batting order players.
+ * See parseRotowireHtml for the exact extraction logic.
  */
 
 import type {
@@ -54,9 +55,9 @@ import { fetchWithTimeout } from "./fetchWithTimeout";
 
 export interface RotowireProjectedSourceOptions {
   /**
-   * Full URL to fetch the projected lineup JSON from.
+   * Full URL to fetch the projected lineups page from.
    * This is injected so the adapter works with any Rotowire-compatible
-   * feed — official API, licensed proxy, or local test server.
+   * feed — official page, licensed proxy, or local test server.
    */
   readonly endpointUrl: string;
   /** Optional fetch timeout override (default: 15s via fetchWithTimeout). */
@@ -191,113 +192,200 @@ const buildGameId = (date: string, awayAbbr: string, homeAbbr: string): GameId =
   asGameId(`mlb-${date}-${awayAbbr.toLowerCase()}-${homeAbbr.toLowerCase()}`);
 
 // ---------------------------------------------------------------------------
-// Payload parsing — PROVIDER-SPECIFIC, isolated to this module
+// HTML parsing helpers — PROVIDER-SPECIFIC, isolated to this module
 // ---------------------------------------------------------------------------
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
-
-const readString = (value: unknown): string | null =>
-  typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
-
-const readNumber = (value: unknown): number | null =>
-  typeof value === "number" && Number.isFinite(value) ? value : null;
-
-const parseRwStarter = (raw: unknown): RwStarter | null => {
-  if (!isRecord(raw)) return null;
-  const name = readString(raw.name);
-  const hand = readString(raw.hand);
-  const status = readString(raw.status);
-  if (!name || !hand || !status) return null;
-  return { name, hand, status };
-};
-
-const parseRwLineupPlayer = (raw: unknown): RwLineupPlayer | null => {
-  if (!isRecord(raw)) return null;
-  const name = readString(raw.name);
-  const battingOrder = readNumber(raw.batting_order);
-  const position = readString(raw.position);
-  const hand = readString(raw.hand);
-  if (!name || battingOrder === null || !position || !hand) return null;
-  return { name, batting_order: battingOrder, position, hand };
-};
-
 /**
- * Parse a single Rotowire game entry.
- * Returns err if the entry or any of its lineup players are malformed.
- * Fail-closed: one bad field → entire entry rejected → entire payload rejected.
+ * Extract player name slug from a Rotowire player URL path.
+ * e.g., "simeon-woods-richardson-15499" → "simeon-woods-richardson"
+ * The trailing number is the Rotowire player ID.
  */
-const parseRwGame = (raw: unknown, index: number): Result<RwGame, string> => {
-  if (!isRecord(raw)) return err(`Game entry at index ${index} is not an object`);
-  const awayTeam = readString(raw.away_team);
-  const homeTeam = readString(raw.home_team);
-  const gameDate = readString(raw.game_date);
-  if (!awayTeam || !homeTeam || !gameDate)
-    return err(`Game entry at index ${index} missing required fields (away_team, home_team, game_date)`);
+const extractPlayerSlug = (hrefSlug: string): string =>
+  hrefSlug.replace(/-\d+$/, "");
 
-  const awayStarter = parseRwStarter(raw.away_starter);
-  const homeStarter = parseRwStarter(raw.home_starter);
+/**
+ * Convert a slug to a space-separated name.
+ * slugifyPlayerName is idempotent on the result:
+ *   slugifyPlayerName(slugToName("gerrit-cole")) === "gerrit-cole"
+ */
+const slugToName = (slug: string): string => slug.replace(/-/g, " ");
 
-  const rawAwayLineup = Array.isArray(raw.away_lineup) ? raw.away_lineup : null;
-  const rawHomeLineup = Array.isArray(raw.home_lineup) ? raw.home_lineup : null;
+/** Extract a lineup list section (visit or home) from a game card HTML. */
+const extractListSection = (cardHtml: string, sideClass: string): string | null => {
+  const regex = new RegExp(
+    `<ul class="lineup__list ${sideClass}">[\\s\\S]*?<\\/ul>`
+  );
+  const match = cardHtml.match(regex);
+  return match ? match[0] : null;
+};
 
-  // Strict: every lineup player must parse cleanly
-  let awayLineup: readonly RwLineupPlayer[] | null = null;
-  if (rawAwayLineup) {
-    const parsed: RwLineupPlayer[] = [];
-    for (let j = 0; j < rawAwayLineup.length; j++) {
-      const player = parseRwLineupPlayer(rawAwayLineup[j]);
-      if (!player)
-        return err(`Game at index ${index}: away_lineup player at index ${j} is malformed`);
-      parsed.push(player);
-    }
-    awayLineup = parsed.length > 0 ? parsed : null;
+/** Parsed data from one side (visit or home) of a lineup card. */
+interface ParsedSide {
+  readonly starter: RwStarter | null;
+  readonly lineup: readonly RwLineupPlayer[] | null;
+}
+
+/**
+ * Parse pitcher, lineup status, and batting order from one side's
+ * <ul class="lineup__list"> HTML section.
+ */
+const parseSideFromList = (listHtml: string): ParsedSide => {
+  // --- Pitcher ---
+  // <div class="lineup__player-highlight-name">
+  //   <a href="/baseball/player/SLUG-ID">Display Name</a>
+  //   <span class="lineup__throws">R</span>
+  // </div>
+  const pitcherMatch = listHtml.match(
+    /player-highlight-name[\s\S]*?href="\/baseball\/player\/([^"]+)"[\s\S]*?lineup__throws">([^<]+)<\/span>/
+  );
+
+  // --- Status ---
+  // <li class="lineup__status is-confirmed|is-expected">
+  const statusMatch = listHtml.match(/lineup__status\s+is-(\w+)/);
+  const statusStr = statusMatch?.[1] ?? "unknown";
+
+  let starter: RwStarter | null = null;
+  if (pitcherMatch) {
+    const hrefSlug = pitcherMatch[1]!;
+    const hand = pitcherMatch[2]!.trim();
+    const slug = extractPlayerSlug(hrefSlug);
+
+    starter = {
+      name: slugToName(slug),
+      hand,
+      status: statusStr
+    };
   }
 
-  let homeLineup: readonly RwLineupPlayer[] | null = null;
-  if (rawHomeLineup) {
-    const parsed: RwLineupPlayer[] = [];
-    for (let j = 0; j < rawHomeLineup.length; j++) {
-      const player = parseRwLineupPlayer(rawHomeLineup[j]);
-      if (!player)
-        return err(`Game at index ${index}: home_lineup player at index ${j} is malformed`);
-      parsed.push(player);
-    }
-    homeLineup = parsed.length > 0 ? parsed : null;
+  // --- Lineup players ---
+  // <li class="lineup__player">
+  //   <div class="lineup__pos">CF</div>
+  //   <a title="Full Name" href="/baseball/player/SLUG-ID">Display</a>
+  //   <span class="lineup__bats">R</span>
+  // </li>
+  //
+  // Use the href slug (not title or display text) for the name field,
+  // since display text may be abbreviated ("S. Woods Richardson") while
+  // the URL slug always has the full name ("simeon-woods-richardson").
+  const playerPattern =
+    /lineup__player"[\s\S]*?lineup__pos">([^<]+)<\/div>[\s\S]*?href="\/baseball\/player\/([^"]+)"[\s\S]*?lineup__bats">([^<]+)<\/span>/g;
+
+  const players: RwLineupPlayer[] = [];
+  let playerMatch: RegExpExecArray | null;
+  while ((playerMatch = playerPattern.exec(listHtml)) !== null) {
+    const position = playerMatch[1]!.trim();
+    const hrefSlug = playerMatch[2]!;
+    const hand = playerMatch[3]!.trim();
+    const slug = extractPlayerSlug(hrefSlug);
+
+    players.push({
+      name: slugToName(slug),
+      batting_order: players.length + 1,
+      position,
+      hand
+    });
   }
 
-  return ok({
-    away_team: awayTeam,
-    home_team: homeTeam,
-    game_date: gameDate,
-    away_starter: awayStarter,
-    home_starter: homeStarter,
-    away_lineup: awayLineup,
-    home_lineup: homeLineup
-  });
+  return {
+    starter,
+    lineup: players.length > 0 ? players : null
+  };
 };
 
 /**
- * Parse the full Rotowire response payload into validated RwGame[].
+ * Parse the Rotowire daily lineups HTML page into validated RwGame[].
  *
- * Fail-closed: if ANY game entry is malformed (missing required fields,
- * non-object entry, or malformed lineup player), the entire payload is
- * rejected with err.  The adapter does not silently skip bad entries.
+ * Each game card is a <div class="lineup is-mlb"> block containing
+ * team abbreviations, pitcher highlights, lineup status, and batters.
+ * Games with "not-in-slate" class are still parsed (we want all games,
+ * not just DFS slate games).
+ *
+ * Skip policy:
+ * - Cards without two `lineup__abbr` divs are skipped (e.g., the single
+ *   Rotowire "is-tools" promotional card at the bottom of the page).
+ * - If no `is-mlb` cards exist at all, returns ok([]) — valid empty slate
+ *   (off-season, no games today).
+ *
+ * Fail-closed guard:
+ * - If the page contains multiple card sections but ALL of them are
+ *   skipped (zero games extracted), the parser returns err — this
+ *   indicates a provider HTML structure change, not "no games today."
+ *   A legitimate no-games page has zero card sections, not many
+ *   unparseable ones.
  */
-export const parseRotowirePayload = (
-  payload: unknown
+export const parseRotowireHtml = (
+  html: string,
+  date: string
 ): Result<readonly RwGame[], string> => {
-  if (!Array.isArray(payload)) {
-    return err("Rotowire response must be a JSON array of games");
+  if (typeof html !== "string" || html.trim().length === 0) {
+    return err("Rotowire response is empty");
+  }
+
+  // Split at each game card boundary.
+  // Matches: <div class="lineup is-mlb"> and <div class="lineup is-mlb not-in-slate">
+  // Does NOT match: <div class="lineup is-ad hide-until-lg">
+  const cardParts = html.split(/<div class="lineup is-mlb[^"]*">/);
+
+  // First element is preamble (everything before first card) — skip it.
+  if (cardParts.length <= 1) {
+    // No lineup cards found. Could be off-season, no games today, or
+    // page structure changed. Return empty games (valid scenario).
+    return ok([]);
   }
 
   const games: RwGame[] = [];
-  for (let i = 0; i < payload.length; i++) {
-    const parsed = parseRwGame(payload[i], i);
-    if (!parsed.success) {
-      return err(parsed.error);
+
+  for (let i = 1; i < cardParts.length; i++) {
+    const section = cardParts[i]!;
+
+    // --- Team abbreviations ---
+    // <div class="lineup__abbr">MIN</div>  (first = away, second = home)
+    const abbrMatches = [
+      ...section.matchAll(/<div class="lineup__abbr">([^<]+)<\/div>/g)
+    ];
+
+    // Skip non-game cards (e.g., "is-tools" promotional cards that match
+    // the is-mlb split but contain no team abbreviations).
+    if (abbrMatches.length < 2) {
+      continue;
     }
-    games.push(parsed.data);
+
+    const awayTeam = abbrMatches[0]![1]!.trim();
+    const homeTeam = abbrMatches[1]![1]!.trim();
+
+    if (!awayTeam || !homeTeam) {
+      continue;
+    }
+
+    // --- Parse each side ---
+    const visitList = extractListSection(section, "is-visit");
+    const homeList = extractListSection(section, "is-home");
+
+    const awaySide = visitList ? parseSideFromList(visitList) : { starter: null, lineup: null };
+    const homeSide = homeList ? parseSideFromList(homeList) : { starter: null, lineup: null };
+
+    games.push({
+      away_team: awayTeam,
+      home_team: homeTeam,
+      game_date: date,
+      away_starter: awaySide.starter,
+      home_starter: homeSide.starter,
+      away_lineup: awaySide.lineup,
+      home_lineup: homeSide.lineup
+    });
+  }
+
+  // Fail-closed guard: if the page had multiple card sections but we
+  // extracted zero games, every card was skipped.  One skipped card is
+  // expected (the promotional "is-tools" card).  More than one means the
+  // HTML structure changed and real game cards became unparseable.
+  const totalCardSections = cardParts.length - 1; // exclude preamble
+  const skippedCards = totalCardSections - games.length;
+  if (games.length === 0 && skippedCards > 1) {
+    return err(
+      `Rotowire page contained ${totalCardSections} lineup card sections but ` +
+      `none yielded a parseable game — possible HTML structure change`
+    );
   }
 
   return ok(games);
@@ -377,7 +465,7 @@ export const createRotowireProjectedSourceAdapter = (
       options.endpointUrl,
       {
         method: "GET",
-        headers: { Accept: "application/json" },
+        headers: { Accept: "text/html" },
         cache: "no-store",
         ...(options.timeoutMs ? { timeoutMs: options.timeoutMs } : {})
       }
@@ -393,14 +481,14 @@ export const createRotowireProjectedSourceAdapter = (
       );
     }
 
-    let payload: unknown;
+    let html: string;
     try {
-      payload = await response.json();
+      html = await response.text();
     } catch {
-      return err("Rotowire projected lineups response was not valid JSON");
+      return err("Rotowire projected lineups response could not be read as text");
     }
 
-    const parsed = parseRotowirePayload(payload);
+    const parsed = parseRotowireHtml(html, date);
     if (!parsed.success) {
       return err(parsed.error);
     }
