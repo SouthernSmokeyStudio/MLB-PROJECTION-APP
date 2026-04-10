@@ -52,6 +52,30 @@ const readNullableNumber = (
   return value;
 };
 
+const readOwnershipSource = (
+  record: Record<string, unknown>,
+  fieldName: string
+): DfsEdgeBoardRow["draftkings_classic"]["ownership_source"] => {
+  const value = record[fieldName];
+
+  if (value === null || value === undefined) {
+    return null;
+  }
+
+  if (typeof value !== "string") {
+    throw new Error(`DFS edge payload has invalid ${fieldName}.`);
+  }
+
+  switch (value) {
+    case "placeholder":
+    case "model":
+    case "provider":
+      return value;
+    default:
+      throw new Error(`DFS edge payload has invalid ${fieldName}.`);
+  }
+};
+
 const readNumber = (record: Record<string, unknown>, fieldName: string): number => {
   const value = readNullableNumber(record, fieldName);
   if (value === null) {
@@ -246,6 +270,8 @@ const parseDraftKingsClassicState = (
     draftable_id: readNullableString(value, "draftable_id"),
     salary: readNullableNumber(value, "salary"),
     value: readNullableNumber(value, "value"),
+    projected_ownership: readNullableNumber(value, "projected_ownership"),
+    ownership_source: readOwnershipSource(value, "ownership_source"),
     blocked: readBlockedState(value.blocked)
   };
 };

@@ -4,13 +4,13 @@ import Image from "next/image";
 import React, { startTransition, useEffect, useState } from "react";
 import type { BettingEdgeBoardPayload } from "@lib/contracts/betting-edge-board";
 import type { DfsEdgeBoardPayload } from "@lib/contracts/dfs-edge-board";
+import type { LiveScoreboardPayload } from "@lib/contracts/live-scoreboard";
 import type { PlayerBoardPayload } from "@lib/contracts/player-board";
 import type { ScheduleBoardPayload, ScheduleBoardSummary } from "@lib/contracts/schedule-board";
-import { formatAmericanOdds, formatBettingEdgePercent, formatBettingEdgeProbability, formatBettingEdgeStatus, formatFairAmericanOdds, getBettingEdgeLeader, parseBettingEdgeBoardPayload } from "@lib/betting-edge-board";
-import { formatDfsEdgeStatus, formatDraftKingsClassicSalary, formatDraftKingsClassicValue, parseDfsEdgeBoardPayload } from "@lib/dfs-edge-board";
-import { buildGameProjectionBoard, formatAverageTotalLabel, formatFavoriteLabel, formatProjectedMarginLabel, formatProjectedRuns, type GameProjectionBoard } from "@lib/game-projection-board";
-import { buildPlayerProjectionBoard, type PlayerProjectionBoard } from "@lib/player-projection-board";
-import { buildPlayerDetailSummary, buildPlayerRoleLabel, buildPlayerStatSummary, formatPlayerProjectedPoints, formatPlayerProjectionStatus, parsePlayerBoardPayload } from "@lib/player-board";
+import type { SmokeSignalPayload } from "@lib/contracts/smoke-signal";
+import { formatAmericanOdds, formatBettingEdgePercent, formatBettingEdgeProbability, formatBettingEdgeStatus, formatFairAmericanOdds, getBettingEdgeLeader } from "@lib/betting-edge-board";
+import { formatDfsEdgeStatus, formatDraftKingsClassicSalary, formatDraftKingsClassicValue } from "@lib/dfs-edge-board";
+import { buildPlayerDetailSummary, buildPlayerRoleLabel, buildPlayerStatSummary, formatPlayerProjectedPoints, formatPlayerProjectionStatus, getPlayerProjectedPoints } from "@lib/player-board";
 import {
   EMPTY_SCHEDULE_SUMMARY,
   buildAvailabilityLine,
@@ -24,9 +24,9 @@ import {
   formatSourceLabel,
   formatStatusLabel,
   getErrorMessage,
-  parseScheduleBoardPayload,
   readResponseError,
 } from "@lib/schedule-board";
+import { parseSlateSnapshotPayload } from "@lib/slate-snapshot";
 
 export const DASHBOARD_TABS = [
   { id: "schedule", label: "Schedule" },
@@ -38,76 +38,92 @@ export const DASHBOARD_TABS = [
 ] as const;
 
 type DashboardTabId = (typeof DASHBOARD_TABS)[number]["id"];
-type InactiveTabId = Exclude<DashboardTabId, "schedule" | "game-projections" | "player-projections" | "dfs-edge" | "betting-edge">;
-
-interface TabPlaceholder {
-  readonly eyebrow: string;
-  readonly title: string;
-  readonly body: string;
-  readonly note: string;
-}
 
 interface ScheduleState {
   readonly status: "loading" | "success" | "empty" | "error";
   readonly board: ScheduleBoardPayload | null;
   readonly error: string | null;
+  readonly note: string | null;
 }
 
 interface PlayerState {
   readonly status: "loading" | "success" | "empty" | "error";
   readonly board: PlayerBoardPayload | null;
   readonly error: string | null;
+  readonly note: string | null;
 }
 
 interface DfsState {
   readonly status: "loading" | "success" | "empty" | "error";
   readonly board: DfsEdgeBoardPayload | null;
   readonly error: string | null;
+  readonly note: string | null;
 }
 
 interface BettingState {
   readonly status: "loading" | "success" | "empty" | "error";
   readonly board: BettingEdgeBoardPayload | null;
   readonly error: string | null;
+  readonly note: string | null;
 }
 
-const SCHEDULE_ROUTE = "/api/games";
-const PLAYER_ROUTE = "/api/players";
-const DFS_EDGE_ROUTE = "/api/dfs-edge";
-const BETTING_EDGE_ROUTE = "/api/betting-edge";
-const LOGO_SRC = "/sss-smokey-studio-logo.jpeg";
+interface LiveScoreboardState {
+  readonly status: "loading" | "success" | "empty" | "error";
+  readonly board: LiveScoreboardPayload | null;
+  readonly error: string | null;
+  readonly note: string | null;
+}
 
-export const TAB_PLACEHOLDERS: Record<InactiveTabId, TabPlaceholder> = {
-  "smoke-signal": {
-    eyebrow: "Blocked",
-    title: "Smoke Signal stays off until reviewed signal content is live.",
-    body: "The Schedule board is now useful on real route data, but signal content still does not have a truthful live surface here.",
-    note: "Current repo truth still does not justify a live signal panel.",
-  },
-};
+interface SmokeSignalState {
+  readonly status: "loading" | "success" | "empty" | "error";
+  readonly board: SmokeSignalPayload | null;
+  readonly error: string | null;
+  readonly note: string | null;
+}
+
+const SNAPSHOT_ROUTE = "/api/slate-snapshot";
+const LOGO_SRC = "/sss-smokey-studio-logo.jpeg";
 
 const INITIAL_SCHEDULE_STATE: ScheduleState = {
   status: "loading",
   board: null,
   error: null,
+  note: null,
 };
 
 const INITIAL_PLAYER_STATE: PlayerState = {
   status: "loading",
   board: null,
   error: null,
+  note: null,
 };
 
 const INITIAL_DFS_STATE: DfsState = {
   status: "loading",
   board: null,
   error: null,
+  note: null,
 };
 
 const INITIAL_BETTING_STATE: BettingState = {
   status: "loading",
   board: null,
   error: null,
+  note: null,
+};
+
+const INITIAL_LIVE_SCOREBOARD_STATE: LiveScoreboardState = {
+  status: "loading",
+  board: null,
+  error: null,
+  note: null,
+};
+
+const INITIAL_SMOKE_SIGNAL_STATE: SmokeSignalState = {
+  status: "loading",
+  board: null,
+  error: null,
+  note: null,
 };
 
 interface BoardPopulationCopy {
@@ -115,12 +131,110 @@ interface BoardPopulationCopy {
   readonly body: string;
 }
 
-const buildGameDetailButtonLabel = (game: ScheduleBoardPayload["games"][number] | GameProjectionBoard["games"][number]): string => `Open game detail for ${game.away_team.abbreviation} at ${game.home_team.abbreviation}`;
+const buildGameDetailButtonLabel = (
+  game: ScheduleBoardPayload["games"][number]
+): string => `Open game detail for ${game.away_team.abbreviation} at ${game.home_team.abbreviation}`;
+
+export const formatStatusRailMatchup = (
+  game: LiveScoreboardPayload["games"][number]
+): string =>
+  game.away_score === null || game.home_score === null
+    ? `${game.away_team_abbreviation} at ${game.home_team_abbreviation}`
+    : `${game.away_team_abbreviation} ${game.away_score} at ${game.home_team_abbreviation} ${game.home_score}`;
+
+export const formatStatusRailBadge = (
+  game: LiveScoreboardPayload["games"][number]
+): string => {
+  if (game.blocked.is_blocked) {
+    return "Score blocked";
+  }
+
+  if (game.is_final) {
+    return "Final";
+  }
+
+  if (game.is_live) {
+    return game.display_state ?? "Live";
+  }
+
+  return formatStatusLabel(game.status);
+};
+
+export const formatStatusRailPrimaryMeta = (
+  game: LiveScoreboardPayload["games"][number]
+): string => {
+  if (game.blocked.is_blocked) {
+    return game.blocked.blocked_reason ?? "Live score blocked";
+  }
+
+  if (game.is_live || game.is_final) {
+    return game.display_state ?? formatStatusLabel(game.status);
+  }
+
+  return formatScheduledStart(game.scheduled_start);
+};
+
+const formatSmokeSignalTotal = (
+  signal: SmokeSignalPayload["top_projected_total_game"]
+): string =>
+  signal === null || signal.projected_total === null
+    ? "Projected total unavailable"
+    : `${signal.projected_total.toFixed(1)} total | ${formatStatusLabel(signal.status)}`;
+
+const formatSmokeSignalPlayer = (
+  signal: SmokeSignalPayload["top_projected_player"]
+): string =>
+  signal === null
+    ? "Projected player unavailable"
+    : `${signal.team_abbreviation} | ${
+        signal.projected_points === null ? "Projected points unavailable" : `${signal.projected_points.toFixed(1)} pts`
+      }`;
+
+const formatSmokeSignalDfs = (
+  signal: SmokeSignalPayload["top_dfs_value_player"]
+): string =>
+  signal === null
+    ? "DFS value unavailable"
+    : `${formatDraftKingsClassicSalary(signal.salary)} | ${formatDraftKingsClassicValue(signal.value)} | ${
+        signal.projected_ownership === null ? "Ownership unavailable" : `${(signal.projected_ownership * 100).toFixed(1)}% own`
+      }`;
+
+const formatSmokeSignalBetting = (
+  signal: SmokeSignalPayload["top_betting_edge_side"]
+): string =>
+  signal === null
+    ? "Betting edge unavailable"
+    : `${signal.team_abbreviation} ${formatAmericanOdds(signal.market_odds_american)} | ${formatBettingEdgePercent(signal.edge)}`;
+
+const formatSmokeSignalPulse = (
+  signal: SmokeSignalPayload["live_pulse"]
+): string =>
+  signal === null
+    ? "Live pulse unavailable"
+    : `${signal.live_games} live | ${signal.final_games} final | ${signal.pregame_games} pregame | ${signal.blocked_games} blocked`;
+
+const SmokeSignalCard = ({
+  eyebrow,
+  title,
+  body,
+  blocked,
+}: {
+  eyebrow: string;
+  title: string;
+  body: string;
+  blocked: boolean;
+}) => (
+  <article className={`placeholder-panel-card ${blocked ? "muted" : ""}`}>
+    <p className="workspace-eyebrow">{eyebrow}</p>
+    <h3>{title}</h3>
+    <p>{body}</p>
+  </article>
+);
 
 const buildPlayerCarryLine = (game: ScheduleBoardPayload["games"][number]): string =>
   game.player_projection_status === "ready" ? "Player board is live for this matchup." : "Player board is still building for this matchup.";
 
-const buildPlayerBoardPopulationCopy = (board: PlayerProjectionBoard | null): BoardPopulationCopy | null => {
+const buildPlayerBoardPopulationCopy = (board: PlayerBoardPayload | null): BoardPopulationCopy | null => {
   if (!board) {
     return null;
   }
@@ -132,7 +246,7 @@ const buildPlayerBoardPopulationCopy = (board: PlayerProjectionBoard | null): Bo
     };
   }
 
-  if (board.held_players.length > 0) {
+  if (board.summary.blocked_players > 0) {
     return {
       title: "Some matchups haven't reached the player board yet.",
       body: "The player board is live, but some matchups are still held.",
@@ -185,6 +299,132 @@ const buildBettingBoardPopulationCopy = (board: BettingEdgeBoardPayload | null):
 
   return null;
 };
+
+const getReadyGames = (
+  scheduleBoard: ScheduleBoardPayload | null
+): readonly ScheduleBoardPayload["games"][number][] =>
+  scheduleBoard?.games.filter((game) => !game.projection.blocked.is_blocked) ?? [];
+
+const getHighestProjectedTotalGame = (
+  scheduleBoard: ScheduleBoardPayload | null
+): ScheduleBoardPayload["games"][number] | null =>
+  getReadyGames(scheduleBoard).reduce<ScheduleBoardPayload["games"][number] | null>(
+    (best, game) =>
+      best === null ||
+      (game.projection.projected_total ?? -1) > (best.projection.projected_total ?? -1)
+        ? game
+        : best,
+    null
+  );
+
+const getStrongestFavoriteGame = (
+  scheduleBoard: ScheduleBoardPayload | null
+): ScheduleBoardPayload["games"][number] | null =>
+  getReadyGames(scheduleBoard).reduce<ScheduleBoardPayload["games"][number] | null>(
+    (best, game) => {
+      const gameFavorite = Math.max(
+        game.projection.away_win_probability ?? -1,
+        game.projection.home_win_probability ?? -1
+      );
+      const bestFavorite =
+        best === null
+          ? -1
+          : Math.max(
+              best.projection.away_win_probability ?? -1,
+              best.projection.home_win_probability ?? -1
+            );
+
+      return best === null || gameFavorite > bestFavorite ? game : best;
+    },
+    null
+  );
+
+const getFavoriteTeamAbbreviation = (
+  game: ScheduleBoardPayload["games"][number]
+): string | null => {
+  const away = game.projection.away_win_probability;
+  const home = game.projection.home_win_probability;
+
+  if (away === null || home === null) {
+    return null;
+  }
+
+  return away >= home ? game.away_team.abbreviation : game.home_team.abbreviation;
+};
+
+const getFavoriteProbability = (
+  game: ScheduleBoardPayload["games"][number]
+): number | null => {
+  const away = game.projection.away_win_probability;
+  const home = game.projection.home_win_probability;
+
+  if (away === null || home === null) {
+    return null;
+  }
+
+  return Math.max(away, home);
+};
+
+const buildFavoriteLabel = (
+  game: ScheduleBoardPayload["games"][number]
+): string | null => {
+  const favoriteTeamAbbreviation = getFavoriteTeamAbbreviation(game);
+  const favoriteProbability = getFavoriteProbability(game);
+
+  return favoriteTeamAbbreviation === null || favoriteProbability === null
+    ? null
+    : `${favoriteTeamAbbreviation} ${(favoriteProbability * 100).toFixed(1)}% win`;
+};
+
+const buildProjectedMarginLabel = (
+  game: ScheduleBoardPayload["games"][number]
+): string | null => {
+  const awayRuns = game.projection.projected_away_runs;
+  const homeRuns = game.projection.projected_home_runs;
+
+  if (awayRuns === null || homeRuns === null) {
+    return null;
+  }
+
+  if (awayRuns >= homeRuns) {
+    return `${game.away_team.abbreviation} +${(awayRuns - homeRuns).toFixed(1)} runs`;
+  }
+
+  return `${game.home_team.abbreviation} +${(homeRuns - awayRuns).toFixed(1)} runs`;
+};
+
+const buildAverageTotalLabel = (
+  game: ScheduleBoardPayload["games"][number]
+): string | null =>
+  game.projection.average_total_runs === null
+    ? null
+    : `Avg ${game.projection.average_total_runs.toFixed(1)} runs`;
+
+const formatProjectedRuns = (value: number | null): string =>
+  value === null ? "--" : value.toFixed(1);
+
+const getReadyPlayers = (playerBoard: PlayerBoardPayload | null) =>
+  playerBoard?.players.filter((player) => !player.projection.blocked.is_blocked) ?? [];
+
+const getReadyPitchers = (playerBoard: PlayerBoardPayload | null) =>
+  getReadyPlayers(playerBoard).filter((player) => player.position === "P");
+
+const getReadyBatters = (playerBoard: PlayerBoardPayload | null) =>
+  getReadyPlayers(playerBoard).filter((player) => player.position !== "P");
+
+const getHeldPlayers = (playerBoard: PlayerBoardPayload | null) =>
+  playerBoard?.players.filter((player) => player.projection.blocked.is_blocked) ?? [];
+
+const getTopProjectedPlayer = (playerBoard: PlayerBoardPayload | null) =>
+  getReadyPlayers(playerBoard).reduce<PlayerBoardPayload["players"][number] | null>(
+    (best, player) => {
+      const playerPoints = getPlayerProjectedPoints(player) ?? -1;
+      const bestPoints = best === null ? -1 : getPlayerProjectedPoints(best) ?? -1;
+
+      return best === null || playerPoints > bestPoints ? player : best;
+    },
+    null
+  );
 
 const BoardPopulationNote = ({ copy }: { copy: BoardPopulationCopy | null }) =>
   copy ? (
@@ -285,13 +525,15 @@ const GameDetailDrawer = ({ game, onClose }: { game: ScheduleBoardPayload["games
 };
 
 const StatusRail = ({
-  scheduleState,
   scheduleBoard,
+  liveScoreboardState,
+  liveScoreboard,
   summary,
   onOpenGameDetail,
 }: {
-  scheduleState: ScheduleState;
   scheduleBoard: ScheduleBoardPayload | null;
+  liveScoreboardState: LiveScoreboardState;
+  liveScoreboard: LiveScoreboardPayload | null;
   summary: ScheduleBoardSummary;
   onOpenGameDetail: (gameId: ScheduleBoardPayload["games"][number]["game_id"]) => void;
 }) => (
@@ -347,15 +589,15 @@ const StatusRail = ({
         <span>Board Watch</span>
         <span>First Six</span>
       </div>
-      {scheduleState.status === "loading" ? <div className="status-rail-note">Loading today&apos;s board.</div> : null}
-      {scheduleState.status === "error" ? <div className="status-rail-note error">The shell is live, but the slate data could not load.</div> : null}
-      {scheduleState.status === "empty" ? <div className="status-rail-note">{scheduleBoard?.note ?? "The feed is up, but there is nothing on the board yet."}</div> : null}
-      {scheduleState.status === "success" && scheduleBoard ? (
+      {liveScoreboardState.status === "loading" ? <div className="status-rail-note">Loading today&apos;s board.</div> : null}
+      {liveScoreboardState.status === "error" ? <div className="status-rail-note error">The shell is live, but the live scoreboard could not load.</div> : null}
+      {liveScoreboardState.status === "empty" ? <div className="status-rail-note">{liveScoreboardState.note ?? liveScoreboard?.note ?? "The feed is up, but there is no live scoreboard state on the board yet."}</div> : null}
+      {liveScoreboardState.status === "success" && liveScoreboard ? (
         <div className="status-list">
-          {scheduleBoard.games.slice(0, 6).map((game) => (
-            <div className={`status-list-row is-clickable ${game.projection.blocked.is_blocked ? "rejected" : "approved"}`} key={game.game_id}>
+          {liveScoreboard.games.slice(0, 6).map((game) => (
+            <div className={`status-list-row is-clickable ${game.blocked.is_blocked ? "rejected" : "approved"}`} key={game.game_id}>
               <button
-                aria-label={buildGameDetailButtonLabel(game)}
+                aria-label={`Open game detail for ${game.away_team_abbreviation} at ${game.home_team_abbreviation}`}
                 className="detail-hitarea"
                 type="button"
                 onClick={() => {
@@ -363,14 +605,12 @@ const StatusRail = ({
                 }}
               />
               <div className="status-list-topline">
-                <span className={`status-list-badge ${game.projection.blocked.is_blocked ? "rejected" : "approved"}`}>{formatProjectionReadyLabel(game)}</span>
+                <span className={`status-list-badge ${game.blocked.is_blocked ? "rejected" : "approved"}`}>{formatStatusRailBadge(game)}</span>
                 <span className="status-list-tier">{formatStatusLabel(game.status)}</span>
               </div>
-              <strong>
-                {game.away_team.abbreviation} at {game.home_team.abbreviation}
-              </strong>
+              <strong>{formatStatusRailMatchup(game)}</strong>
               <div className="status-list-meta">
-                <span>{formatScheduledStart(game.scheduled_start)}</span>
+                <span>{formatStatusRailPrimaryMeta(game)}</span>
                 <span>{game.venue_name ?? "Venue pending"}</span>
               </div>
             </div>
@@ -438,7 +678,7 @@ const ScheduleWorkspace = ({
       <div className="schedule-state">
         <p className="workspace-eyebrow">No Board</p>
         <h3>There are no matchups to show right now.</h3>
-        <p>{scheduleBoard?.note ?? "The route responded, but the board is empty."}</p>
+        <p>{scheduleState.note ?? scheduleBoard?.note ?? "The route responded, but the board is empty."}</p>
       </div>
     ) : null}
 
@@ -519,15 +759,25 @@ const ScheduleWorkspace = ({
 
 const GameProjectionsWorkspace = ({
   scheduleState,
-  projectionBoard,
+  scheduleBoard,
   onOpenGameDetail,
 }: {
   scheduleState: ScheduleState;
-  projectionBoard: GameProjectionBoard | null;
+  scheduleBoard: ScheduleBoardPayload | null;
   onOpenGameDetail: (gameId: ScheduleBoardPayload["games"][number]["game_id"]) => void;
 }) => {
   const [filter, setFilter] = useState<"all" | "ready" | "held">("all");
   const [sortBy, setSortBy] = useState<"default" | "total">("default");
+  const readyGames = getReadyGames(scheduleBoard);
+  const strongestFavoriteGame = getStrongestFavoriteGame(scheduleBoard);
+  const highestTotalGame = getHighestProjectedTotalGame(scheduleBoard);
+  const averageReadyTotal =
+    readyGames.length === 0
+      ? null
+      : readyGames.reduce(
+          (sum, game) => sum + (game.projection.projected_total ?? 0),
+          0
+        ) / readyGames.length;
 
   return (
   <section className="workspace-panel" role="tabpanel" aria-labelledby="tab-game-projections">
@@ -538,9 +788,9 @@ const GameProjectionsWorkspace = ({
         <p className="workspace-copy">This board makes the matchup projection itself primary: projected score, favorite, run margin, total, and blocked state from the live route. No market lines, weather overlays, or injury dressing.</p>
       </div>
       <div className="workspace-pill-stack">
-        <span className="workspace-pill">{projectionBoard ? formatSourceLabel(projectionBoard.source) : "Feed pending"}</span>
-        <span className="workspace-pill">{projectionBoard ? `${projectionBoard.summary.projection_ready_games} ready` : "Waiting on projections"}</span>
-        <span className="workspace-pill">{projectionBoard ? `Built ${formatGeneratedStamp(projectionBoard.generated_at)}` : "Waiting on update"}</span>
+        <span className="workspace-pill">{scheduleBoard ? formatSourceLabel(scheduleBoard.source) : "Feed pending"}</span>
+        <span className="workspace-pill">{scheduleBoard ? `${readyGames.length} ready` : "Waiting on projections"}</span>
+        <span className="workspace-pill">{scheduleBoard ? `Built ${formatGeneratedStamp(scheduleBoard.generated_at)}` : "Waiting on update"}</span>
       </div>
     </div>
 
@@ -550,7 +800,11 @@ const GameProjectionsWorkspace = ({
         <h3 className="workspace-board-title">Today&apos;s Models</h3>
       </div>
       <p className="workspace-board-note">
-        {projectionBoard?.summary.strongest_favorite ? `${projectionBoard.summary.strongest_favorite.team_abbreviation} ${(projectionBoard.summary.strongest_favorite.value * 100).toFixed(1)}% top favorite` : "No ready projections yet"}
+        {strongestFavoriteGame
+          ? `${getFavoriteTeamAbbreviation(strongestFavoriteGame)} ${(
+              (getFavoriteProbability(strongestFavoriteGame) ?? 0) * 100
+            ).toFixed(1)}% top favorite`
+          : "No ready projections yet"}
       </p>
     </div>
 
@@ -572,11 +826,11 @@ const GameProjectionsWorkspace = ({
       <div className="schedule-state">
         <p className="workspace-eyebrow">No Board</p>
         <h3>There are no matchup projections to show right now.</h3>
-        <p>{projectionBoard?.note ?? "The route responded, but the board is empty."}</p>
+        <p>{scheduleState.note ?? scheduleBoard?.note ?? "The route responded, but the board is empty."}</p>
       </div>
     ) : null}
 
-    {scheduleState.status === "success" && projectionBoard ? (
+    {scheduleState.status === "success" && scheduleBoard ? (
       <>
         <div className="board-controls">
           <span className="board-controls-label">Show</span>
@@ -606,26 +860,26 @@ const GameProjectionsWorkspace = ({
         <div className="projection-board">
         <div className="projection-board-title">Modeled Matchups</div>
         <div className="projection-summary-strip">
-          <span>{projectionBoard.summary.total_games} games</span>
-          <span>{projectionBoard.summary.projection_ready_games} ready</span>
-          <span>{projectionBoard.summary.games_ready_for_player_projections} player-ready</span>
-          <span>{projectionBoard.summary.blocked_games} blocked</span>
-          <span>{projectionBoard.summary.highest_total ? `Highest total ${projectionBoard.summary.highest_total.value.toFixed(1)}` : "No total yet"}</span>
-          <span>{projectionBoard.summary.average_ready_total === null ? "No ready average" : `Avg ready total ${projectionBoard.summary.average_ready_total.toFixed(1)}`}</span>
+          <span>{scheduleBoard.summary.total_games} games</span>
+          <span>{readyGames.length} ready</span>
+          <span>{scheduleBoard.summary.games_ready_for_player_projections} player-ready</span>
+          <span>{scheduleBoard.summary.blocked_games} blocked</span>
+          <span>{highestTotalGame ? `Highest total ${(highestTotalGame.projection.projected_total ?? 0).toFixed(1)}` : "No total yet"}</span>
+          <span>{averageReadyTotal === null ? "No ready average" : `Avg ready total ${averageReadyTotal.toFixed(1)}`}</span>
         </div>
         <div className="projection-match-list">
-          {projectionBoard.games
-              .filter((game) => filter === "all" || (filter === "ready" ? !game.blocked.is_blocked : game.blocked.is_blocked))
-              .sort((a, b) => sortBy === "total" ? ((b.projected_total ?? -1) - (a.projected_total ?? -1)) : 0)
+          {scheduleBoard.games
+              .filter((game) => filter === "all" || (filter === "ready" ? !game.projection.blocked.is_blocked : game.projection.blocked.is_blocked))
+              .sort((a, b) => sortBy === "total" ? ((b.projection.projected_total ?? -1) - (a.projection.projected_total ?? -1)) : 0)
               .map((game) => {
-            const favoriteLabel = formatFavoriteLabel(game);
-            const marginLabel = formatProjectedMarginLabel(game);
-            const totalLabel = game.projected_total === null ? null : `Total ${game.projected_total.toFixed(1)}`;
-            const averageTotalLabel = formatAverageTotalLabel(game);
+            const favoriteLabel = buildFavoriteLabel(game);
+            const marginLabel = buildProjectedMarginLabel(game);
+            const totalLabel = game.projection.projected_total === null ? null : `Total ${game.projection.projected_total.toFixed(1)}`;
+            const averageTotalLabel = buildAverageTotalLabel(game);
             const completenessLabel = `${Math.round(game.completeness_score * 100)}% inputs`;
 
             return (
-              <article className={`projection-match is-clickable ${game.blocked.is_blocked ? "blocked" : "ready"}`} key={game.game_id}>
+              <article className={`projection-match is-clickable ${game.projection.blocked.is_blocked ? "blocked" : "ready"}`} key={game.game_id}>
                 <button
                   aria-label={buildGameDetailButtonLabel(game)}
                   className="detail-hitarea"
@@ -636,8 +890,8 @@ const GameProjectionsWorkspace = ({
                 />
                 <div className="projection-match-header">
                   <div className="projection-match-heading">
-                    <p className={`projection-match-kicker ${game.blocked.is_blocked ? "blocked" : "ready"}`}>{game.blocked.is_blocked ? "Projection blocked" : "Projection ready"}</p>
-                    <h3>{game.matchup}</h3>
+                    <p className={`projection-match-kicker ${game.projection.blocked.is_blocked ? "blocked" : "ready"}`}>{game.projection.blocked.is_blocked ? "Projection blocked" : "Projection ready"}</p>
+                    <h3>{game.away_team.full_name} at {game.home_team.full_name}</h3>
                   </div>
                   <div className="projection-match-meta">
                     <span>{formatScheduledStart(game.scheduled_start)}</span>
@@ -646,11 +900,11 @@ const GameProjectionsWorkspace = ({
                   </div>
                 </div>
 
-                {game.blocked.is_blocked ? (
+                {game.projection.blocked.is_blocked ? (
                   <div className="projection-match-blocked">
                     <div className="projection-match-copy">
-                      <p className="projection-match-note">{game.starter_summary}</p>
-                      <p className="projection-match-subnote">{game.availability_summary}</p>
+                      <p className="projection-match-note">{buildStarterLine(game)}</p>
+                      <p className="projection-match-subnote">{buildAvailabilityLine(game)}</p>
                     </div>
                     <div className="projection-chip-row">
                       <span className="signal-chip signal-chip-neutral">{completenessLabel}</span>
@@ -661,12 +915,12 @@ const GameProjectionsWorkspace = ({
                     <div className="projection-scoreline">
                       <div className="projection-score-team">
                         <span>{game.away_team.abbreviation}</span>
-                        <strong>{formatProjectedRuns(game.projected_away_runs)}</strong>
+                        <strong>{formatProjectedRuns(game.projection.projected_away_runs)}</strong>
                       </div>
                       <div className="projection-score-divider">proj</div>
                       <div className="projection-score-team">
                         <span>{game.home_team.abbreviation}</span>
-                        <strong>{formatProjectedRuns(game.projected_home_runs)}</strong>
+                        <strong>{formatProjectedRuns(game.projection.projected_home_runs)}</strong>
                       </div>
                     </div>
                     <div className="projection-match-copy">
@@ -676,8 +930,8 @@ const GameProjectionsWorkspace = ({
                         {totalLabel ? <span className="signal-chip signal-chip-neutral">{totalLabel}</span> : null}
                         {averageTotalLabel ? <span className="signal-chip signal-chip-neutral">{averageTotalLabel}</span> : null}
                       </div>
-                      <p className="projection-match-note">{game.starter_summary}</p>
-                      <p className="projection-match-subnote">{game.availability_summary}</p>
+                      <p className="projection-match-note">{buildStarterLine(game)}</p>
+                      <p className="projection-match-subnote">{buildAvailabilityLine(game)}</p>
                     </div>
                   </div>
                 )}
@@ -773,8 +1027,12 @@ const DfsEdgeCardGrid = ({ players }: { players: readonly DfsEdgeBoardPayload["r
   );
 };
 
-const PlayerProjectionsWorkspace = ({ playerState, playerProjectionBoard }: { playerState: PlayerState; playerProjectionBoard: PlayerProjectionBoard | null }) => {
-  const populationCopy = buildPlayerBoardPopulationCopy(playerProjectionBoard);
+const PlayerProjectionsWorkspace = ({ playerState, playerBoard }: { playerState: PlayerState; playerBoard: PlayerBoardPayload | null }) => {
+  const populationCopy = buildPlayerBoardPopulationCopy(playerBoard);
+  const readyPitchers = getReadyPitchers(playerBoard);
+  const readyBatters = getReadyBatters(playerBoard);
+  const heldPlayers = getHeldPlayers(playerBoard);
+  const topProjectedPlayer = getTopProjectedPlayer(playerBoard);
 
   return (
     <section className="workspace-panel" role="tabpanel" aria-labelledby="tab-player-projections">
@@ -785,9 +1043,9 @@ const PlayerProjectionsWorkspace = ({ playerState, playerProjectionBoard }: { pl
           <p className="workspace-copy">This board shows pitchers and batters from today&apos;s projected matchups. Players appear once their game has a live projection and both lineups are in.</p>
         </div>
         <div className="workspace-pill-stack">
-          <span className="workspace-pill">{playerProjectionBoard ? formatSourceLabel(playerProjectionBoard.source) : "Feed pending"}</span>
-          <span className="workspace-pill">{playerProjectionBoard ? `${playerProjectionBoard.summary.projected_players} player-ready` : "Waiting on players"}</span>
-          <span className="workspace-pill">{playerProjectionBoard ? `Built ${formatGeneratedStamp(playerProjectionBoard.generated_at)}` : "Waiting on update"}</span>
+          <span className="workspace-pill">{playerBoard ? formatSourceLabel(playerBoard.source) : "Feed pending"}</span>
+          <span className="workspace-pill">{playerBoard ? `${playerBoard.summary.projected_players} player-ready` : "Waiting on players"}</span>
+          <span className="workspace-pill">{playerBoard ? `Built ${formatGeneratedStamp(playerBoard.generated_at)}` : "Waiting on update"}</span>
         </div>
       </div>
 
@@ -797,8 +1055,8 @@ const PlayerProjectionsWorkspace = ({ playerState, playerProjectionBoard }: { pl
           <h3 className="workspace-board-title">Today&apos;s Players</h3>
         </div>
         <p className="workspace-board-note">
-          {playerProjectionBoard?.summary.top_projected_player
-            ? `${playerProjectionBoard.summary.top_projected_player.full_name} ${playerProjectionBoard.summary.top_projected_player.projected_points.toFixed(1)} pts top board`
+          {topProjectedPlayer
+            ? `${topProjectedPlayer.full_name ?? topProjectedPlayer.player_id} ${formatPlayerProjectedPoints(topProjectedPlayer)} pts top board`
             : "No player-ready rows yet"}
         </p>
       </div>
@@ -821,56 +1079,55 @@ const PlayerProjectionsWorkspace = ({ playerState, playerProjectionBoard }: { pl
         <div className="schedule-state">
           <p className="workspace-eyebrow">No Board</p>
           <h3>Player board hasn&apos;t populated yet.</h3>
-          <p>{playerProjectionBoard?.note ?? "This board fills once projected matchups have cleared into live player rows."}</p>
+          <p>{playerState.note ?? playerBoard?.note ?? "This board fills once projected matchups have cleared into live player rows."}</p>
         </div>
       ) : null}
 
-      {playerState.status === "success" && playerProjectionBoard ? (
-        <div className="player-board">
-          <div className="player-board-title">Today&apos;s Player Board</div>
-          <div className="player-summary-strip">
-            <span>{playerProjectionBoard.summary.total_players} players</span>
-            <span>{playerProjectionBoard.summary.projected_players} player-ready</span>
-            <span>{playerProjectionBoard.summary.blocked_players} held</span>
-            <span>{playerProjectionBoard.summary.ready_pitchers} pitchers</span>
-            <span>{playerProjectionBoard.summary.ready_batters} bats</span>
-            <span>{playerProjectionBoard.summary.games_covered} games</span>
+      {playerState.status === "success" && playerBoard ? (
+        <div className="projection-board">
+          <div className="projection-board-title">Today&apos;s Player Board</div>
+          <div className="projection-summary-strip">
+            <span>{playerBoard.summary.total_players} players</span>
+            <span>{playerBoard.summary.projected_players} player-ready</span>
+            <span>{playerBoard.summary.blocked_players} held</span>
+            <span>{readyPitchers.length} pitchers</span>
+            <span>{readyBatters.length} bats</span>
+            <span>{playerBoard.summary.games_covered} games</span>
           </div>
           <BoardPopulationNote copy={populationCopy} />
-
-          <section className="player-section">
-            <div className="player-section-header">
-              <strong>Pitchers</strong>
-              <span>{playerProjectionBoard.summary.ready_pitchers} ready</span>
-            </div>
-            {playerProjectionBoard.ready_pitchers.length > 0 ? (
-              <PlayerCardGrid players={playerProjectionBoard.ready_pitchers} />
-            ) : (
-              <div className="player-section-empty">No pitchers have cleared from today&apos;s projected matchups yet.</div>
-            )}
-          </section>
-
-          <section className="player-section">
-            <div className="player-section-header">
-              <strong>Batters</strong>
-              <span>{playerProjectionBoard.summary.ready_batters} ready</span>
-            </div>
-            {playerProjectionBoard.ready_batters.length > 0 ? (
-              <PlayerCardGrid players={playerProjectionBoard.ready_batters} />
-            ) : (
-              <div className="player-section-empty">No batters have cleared from today&apos;s projected matchups yet.</div>
-            )}
-          </section>
-
-          {playerProjectionBoard.held_players.length > 0 ? (
-            <section className="player-section held">
-              <div className="player-section-header">
-                <strong>Held</strong>
-                <span>{playerProjectionBoard.held_players.length} waiting on projection</span>
+          <div className="projection-match-list">
+            <div className="projection-roster-group">
+              <div className="projection-roster-header">
+                <strong>Pitchers</strong>
+                <span>{readyPitchers.length} ready</span>
               </div>
-              <PlayerCardGrid players={playerProjectionBoard.held_players} />
-            </section>
-          ) : null}
+              {readyPitchers.length > 0 ? (
+                <PlayerCardGrid players={readyPitchers} />
+              ) : (
+                <p className="projection-roster-empty">No pitchers have cleared from today&apos;s projected matchups yet.</p>
+              )}
+            </div>
+            <div className="projection-roster-group">
+              <div className="projection-roster-header">
+                <strong>Batters</strong>
+                <span>{readyBatters.length} ready</span>
+              </div>
+              {readyBatters.length > 0 ? (
+                <PlayerCardGrid players={readyBatters} />
+              ) : (
+                <p className="projection-roster-empty">No batters have cleared from today&apos;s projected matchups yet.</p>
+              )}
+            </div>
+            {heldPlayers.length > 0 ? (
+              <div className="projection-roster-group held">
+                <div className="projection-roster-header">
+                  <strong>Held</strong>
+                  <span>{heldPlayers.length} waiting on projection</span>
+                </div>
+                <PlayerCardGrid players={heldPlayers} />
+              </div>
+            ) : null}
+          </div>
         </div>
       ) : null}
     </section>
@@ -923,14 +1180,14 @@ const DfsEdgeWorkspace = ({ dfsState, dfsBoard }: { dfsState: DfsState; dfsBoard
         <div className="schedule-state">
           <p className="workspace-eyebrow">No Board</p>
           <h3>No DraftKings Classic rows yet.</h3>
-          <p>{dfsBoard?.note ?? "This board fills once player rows have a live DraftKings Classic salary."}</p>
+          <p>{dfsState.note ?? dfsBoard?.note ?? "This board fills once player rows have a live DraftKings Classic salary."}</p>
         </div>
       ) : null}
 
       {dfsState.status === "success" && dfsBoard ? (
-        <div className="player-board">
-          <div className="player-board-title">DraftKings Classic Board</div>
-          <div className="player-summary-strip">
+        <div className="projection-board">
+          <div className="projection-board-title">DraftKings Classic Board</div>
+          <div className="projection-summary-strip">
             <span>{dfsBoard.summary.ready_players} DraftKings-ready</span>
             <span>{dfsBoard.summary.held_players} held</span>
             <span>{dfsBoard.summary.ready_pitchers} pitchers</span>
@@ -939,32 +1196,39 @@ const DfsEdgeWorkspace = ({ dfsState, dfsBoard }: { dfsState: DfsState; dfsBoard
             <span>{dfsBoard.summary.average_ready_value === null ? "No avg value" : `Avg value ${formatDraftKingsClassicValue(dfsBoard.summary.average_ready_value)}`}</span>
           </div>
           <BoardPopulationNote copy={populationCopy} />
-
-          <section className="player-section">
-            <div className="player-section-header">
-              <strong>Pitchers</strong>
-              <span>{dfsBoard.summary.ready_pitchers} DraftKings-ready</span>
-            </div>
-            {dfsBoard.ready_pitchers.length > 0 ? <DfsEdgeCardGrid players={dfsBoard.ready_pitchers} /> : <div className="player-section-empty">No pitchers have both a projection and a DraftKings Classic salary yet.</div>}
-          </section>
-
-          <section className="player-section">
-            <div className="player-section-header">
-              <strong>Batters</strong>
-              <span>{dfsBoard.summary.ready_batters} DraftKings-ready</span>
-            </div>
-            {dfsBoard.ready_batters.length > 0 ? <DfsEdgeCardGrid players={dfsBoard.ready_batters} /> : <div className="player-section-empty">No batters have both a projection and a DraftKings Classic salary yet.</div>}
-          </section>
-
-          {dfsBoard.held_players.length > 0 ? (
-            <section className="player-section held">
-              <div className="player-section-header">
-                <strong>Held</strong>
-                <span>{dfsBoard.held_players.length} waiting on DraftKings Classic salary</span>
+          <div className="projection-match-list">
+            <div className="projection-roster-group">
+              <div className="projection-roster-header">
+                <strong>Pitchers</strong>
+                <span>{dfsBoard.summary.ready_pitchers} DraftKings-ready</span>
               </div>
-              <DfsEdgeCardGrid players={dfsBoard.held_players} />
-            </section>
-          ) : null}
+              {dfsBoard.ready_pitchers.length > 0 ? (
+                <DfsEdgeCardGrid players={dfsBoard.ready_pitchers} />
+              ) : (
+                <p className="projection-roster-empty">No pitchers have both a projection and a DraftKings Classic salary yet.</p>
+              )}
+            </div>
+            <div className="projection-roster-group">
+              <div className="projection-roster-header">
+                <strong>Batters</strong>
+                <span>{dfsBoard.summary.ready_batters} DraftKings-ready</span>
+              </div>
+              {dfsBoard.ready_batters.length > 0 ? (
+                <DfsEdgeCardGrid players={dfsBoard.ready_batters} />
+              ) : (
+                <p className="projection-roster-empty">No batters have both a projection and a DraftKings Classic salary yet.</p>
+              )}
+            </div>
+            {dfsBoard.held_players.length > 0 ? (
+              <div className="projection-roster-group held">
+                <div className="projection-roster-header">
+                  <strong>Held</strong>
+                  <span>{dfsBoard.held_players.length} waiting on DraftKings Classic salary</span>
+                </div>
+                <DfsEdgeCardGrid players={dfsBoard.held_players} />
+              </div>
+            ) : null}
+          </div>
         </div>
       ) : null}
     </section>
@@ -1096,7 +1360,7 @@ const BettingEdgeWorkspace = ({ bettingState, bettingBoard }: { bettingState: Be
         <div className="schedule-state">
           <p className="workspace-eyebrow">No Board</p>
           <h3>No moneyline-ready matchups yet.</h3>
-          <p>{bettingBoard?.note ?? "This board fills once projected matchups have a live DraftKings Sportsbook pregame moneyline."}</p>
+          <p>{bettingState.note ?? bettingBoard?.note ?? "This board fills once projected matchups have a live DraftKings Sportsbook pregame moneyline."}</p>
         </div>
       ) : null}
 
@@ -1111,61 +1375,147 @@ const BettingEdgeWorkspace = ({ bettingState, bettingBoard }: { bettingState: Be
             <span>{bettingBoard.summary.top_edge_side ? `${bettingBoard.summary.top_edge_side.team_abbreviation} ${formatAmericanOdds(bettingBoard.summary.top_edge_side.market_odds_american)}` : "No top side yet"}</span>
           </div>
           <BoardPopulationNote copy={populationCopy} />
-
-          <section className="player-section">
-            <div className="player-section-header">
-              <strong>Moneyline-ready</strong>
-              <span>{bettingBoard.summary.ready_games} ready</span>
-            </div>
-            {bettingBoard.ready_games.length > 0 ? (
-              <BettingEdgeMatchList games={bettingBoard.ready_games} />
-            ) : (
-              <div className="player-section-empty">No projected matchup has a live DraftKings Sportsbook pregame moneyline yet.</div>
-            )}
-          </section>
-
-          {bettingBoard.held_games.length > 0 ? (
-            <section className="player-section held">
-              <div className="player-section-header">
-                <strong>Held</strong>
-                <span>{bettingBoard.held_games.length} waiting on DraftKings Sportsbook moneyline</span>
+          <div className="projection-match-list">
+            <div className="projection-roster-group">
+              <div className="projection-roster-header">
+                <strong>Moneyline-ready</strong>
+                <span>{bettingBoard.summary.ready_games} ready</span>
               </div>
-              <BettingEdgeMatchList games={bettingBoard.held_games} />
-            </section>
-          ) : null}
+              {bettingBoard.ready_games.length > 0 ? (
+                <BettingEdgeMatchList games={bettingBoard.ready_games} />
+              ) : (
+                <p className="projection-roster-empty">No projected matchup has a live DraftKings Sportsbook pregame moneyline yet.</p>
+              )}
+            </div>
+
+            {bettingBoard.held_games.length > 0 ? (
+              <div className="projection-roster-group held">
+                <div className="projection-roster-header">
+                  <strong>Held</strong>
+                  <span>{bettingBoard.held_games.length} waiting on DraftKings Sportsbook moneyline</span>
+                </div>
+                <BettingEdgeMatchList games={bettingBoard.held_games} />
+              </div>
+            ) : null}
+          </div>
         </div>
       ) : null}
     </section>
   );
 };
 
-const PlaceholderWorkspace = ({ tabId }: { tabId: InactiveTabId }) => {
-  const placeholder = TAB_PLACEHOLDERS[tabId];
-
+const SmokeSignalWorkspace = ({
+  smokeSignalState,
+  smokeSignal,
+}: {
+  smokeSignalState: SmokeSignalState;
+  smokeSignal: SmokeSignalPayload | null;
+}) => {
   return (
-    <section className="workspace-panel" role="tabpanel" aria-labelledby={`tab-${tabId}`}>
+    <section className="workspace-panel" role="tabpanel" aria-labelledby="tab-smoke-signal">
       <div className="workspace-header">
         <div className="workspace-header-copy">
-          <p className="workspace-eyebrow">{placeholder.eyebrow}</p>
-          <h2>{placeholder.title}</h2>
-          <p className="workspace-copy">{placeholder.body}</p>
+          <p className="workspace-eyebrow">Smoke Signal</p>
+          <h2>Canonical highlight board</h2>
+          <p className="workspace-copy">
+            This tab reads the typed Smoke Signal payload published by the canonical snapshot. It does not recompute schedule, player, DFS, betting, or live state in the shell.
+          </p>
         </div>
         <div className="workspace-pill-stack">
-          <span className="workspace-pill">Status: Not yet active</span>
+          <span className="workspace-pill">Smoke Signal v1</span>
+          <span className="workspace-pill">{smokeSignal ? `${smokeSignal.summary.ready_signals}/${smokeSignal.summary.total_sections_considered} live` : "Waiting on signal"}</span>
+          <span className="workspace-pill">{smokeSignal ? `Built ${formatGeneratedStamp(smokeSignal.generated_at)}` : "Waiting on update"}</span>
         </div>
       </div>
-      <div className="placeholder-panel">
-        <div className="placeholder-panel-card">
-          <p className="workspace-eyebrow">Truth</p>
-          <h3>This tab is intentionally parked.</h3>
-          <p>{placeholder.note}</p>
+
+      <div className="workspace-board-heading">
+        <div>
+          <span className="workspace-board-kicker">Highlight board</span>
+          <h3 className="workspace-board-title">Smoke Signal</h3>
         </div>
-        <div className="placeholder-panel-card muted">
-          <p className="workspace-eyebrow">Why</p>
-          <h3>Five live boards first.</h3>
-          <p>This phase promotes five real boards with real route data. The rest of the shell stays visible without pretending more live product surfaces exist.</p>
-        </div>
+        <p className="workspace-board-note">{smokeSignalState.note ?? smokeSignal?.note ?? "Canonical highlights only."}</p>
       </div>
+
+      {smokeSignalState.status === "loading" ? (
+        <div className="schedule-state">
+          <p className="workspace-eyebrow">Loading</p>
+          <h3>Loading Smoke Signal</h3>
+          <p>The shell is waiting on the canonical highlight board.</p>
+        </div>
+      ) : null}
+      {smokeSignalState.status === "error" ? (
+        <div className="schedule-state schedule-state-error" role="alert">
+          <p className="workspace-eyebrow">Feed Error</p>
+          <h3>The Smoke Signal board could not be rendered.</h3>
+          <p>{smokeSignalState.error}</p>
+        </div>
+      ) : null}
+      {smokeSignalState.status === "empty" ? (
+        <div className="schedule-state">
+          <p className="workspace-eyebrow">No Board</p>
+          <h3>No Smoke Signal highlights are ready yet.</h3>
+          <p>{smokeSignalState.note ?? smokeSignal?.note ?? "The snapshot is live, but no Smoke Signal slots are available yet."}</p>
+        </div>
+      ) : null}
+
+      {smokeSignalState.status === "success" && smokeSignal ? (
+        <div className="projection-board">
+          <div className="projection-board-title">Smoke Signal v1</div>
+          <div className="projection-summary-strip">
+            <span>{smokeSignal.summary.ready_signals} highlights live</span>
+            <span>{smokeSignal.summary.blocked_signals} unavailable</span>
+            <span>{smokeSignal.overview.total_games} games</span>
+            <span>{smokeSignal.overview.projection_ready_games} projection-ready</span>
+            <span>{smokeSignal.live_pulse ? `${smokeSignal.live_pulse.live_games} live` : "No live pulse"}</span>
+          </div>
+          {smokeSignal.note ? (
+            <div className="board-state-note">
+              <strong>Fallback state</strong>
+              <p>{smokeSignal.note}</p>
+            </div>
+          ) : null}
+          <div className="projection-match-list">
+            <div className="projection-roster-group">
+              <div className="projection-roster-header">
+                <strong>Highlights</strong>
+                <span>{smokeSignal.summary.ready_signals} ready</span>
+              </div>
+              <div className="smoke-signal-grid">
+                <SmokeSignalCard
+                  eyebrow="Top Projected Total"
+                  title={smokeSignal.top_projected_total_game?.matchup ?? "Unavailable"}
+                  body={formatSmokeSignalTotal(smokeSignal.top_projected_total_game)}
+                  blocked={smokeSignal.top_projected_total_game === null}
+                />
+                <SmokeSignalCard
+                  eyebrow="Top Projected Player"
+                  title={smokeSignal.top_projected_player?.full_name ?? "Unavailable"}
+                  body={formatSmokeSignalPlayer(smokeSignal.top_projected_player)}
+                  blocked={smokeSignal.top_projected_player === null}
+                />
+                <SmokeSignalCard
+                  eyebrow="Top DFS Value"
+                  title={smokeSignal.top_dfs_value_player?.full_name ?? "Unavailable"}
+                  body={formatSmokeSignalDfs(smokeSignal.top_dfs_value_player)}
+                  blocked={smokeSignal.top_dfs_value_player === null}
+                />
+                <SmokeSignalCard
+                  eyebrow="Top Betting Edge"
+                  title={smokeSignal.top_betting_edge_side?.matchup ?? "Unavailable"}
+                  body={formatSmokeSignalBetting(smokeSignal.top_betting_edge_side)}
+                  blocked={smokeSignal.top_betting_edge_side === null}
+                />
+                <SmokeSignalCard
+                  eyebrow="Live Pulse"
+                  title={smokeSignal.live_pulse ? "Live slate pulse" : "Unavailable"}
+                  body={formatSmokeSignalPulse(smokeSignal.live_pulse)}
+                  blocked={smokeSignal.live_pulse === null}
+                />
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </section>
   );
 };
@@ -1177,181 +1527,178 @@ export function MlbDashboardShell() {
   const [playerState, setPlayerState] = useState<PlayerState>(INITIAL_PLAYER_STATE);
   const [dfsState, setDfsState] = useState<DfsState>(INITIAL_DFS_STATE);
   const [bettingState, setBettingState] = useState<BettingState>(INITIAL_BETTING_STATE);
+  const [liveScoreboardState, setLiveScoreboardState] = useState<LiveScoreboardState>(INITIAL_LIVE_SCOREBOARD_STATE);
+  const [smokeSignalState, setSmokeSignalState] = useState<SmokeSignalState>(INITIAL_SMOKE_SIGNAL_STATE);
 
   const scheduleBoard = scheduleState.board;
   const summary = scheduleBoard?.summary ?? EMPTY_SCHEDULE_SUMMARY;
-  const projectionBoard = scheduleBoard ? buildGameProjectionBoard(scheduleBoard) : null;
   const playerBoard = playerState.board;
-  const playerProjectionBoard = playerBoard ? buildPlayerProjectionBoard(playerBoard) : null;
   const dfsBoard = dfsState.board;
   const bettingBoard = bettingState.board;
+  const liveScoreboard = liveScoreboardState.board;
+  const smokeSignal = smokeSignalState.board;
   const selectedGame = selectedGameId === null ? null : (scheduleBoard?.games.find((game) => game.game_id === selectedGameId) ?? null);
 
   useEffect(() => {
     let cancelled = false;
     const controller = new AbortController();
 
-    const loadSchedule = async (): Promise<void> => {
+    const loadSnapshot = async (): Promise<void> => {
       try {
-        const response = await fetch(SCHEDULE_ROUTE, {
+        const response = await fetch(SNAPSHOT_ROUTE, {
           cache: "no-store",
           signal: controller.signal,
         });
         const payload = (await response.json()) as unknown;
 
         if (!response.ok) {
-          throw new Error(readResponseError(payload) ?? `Schedule board request failed with status ${response.status}.`);
+          throw new Error(readResponseError(payload) ?? `Snapshot request failed with status ${response.status}.`);
         }
 
-        const parsed = parseScheduleBoardPayload(payload);
+        const snapshot = parseSlateSnapshotPayload(payload);
+        const parsedScheduleBoard = snapshot.schedule.payload;
+        const parsedPlayerBoard = snapshot.player_projections.payload;
+        const parsedDfsBoard = snapshot.dfs_edge.payload;
+        const parsedBettingBoard = snapshot.betting_edge.payload;
+        const parsedLiveScoreboard = snapshot.live_scoreboard.payload;
+        const parsedSmokeSignal = snapshot.smoke_signal.payload;
+
+        if (parsedScheduleBoard === null || parsedPlayerBoard === null) {
+          throw new Error("Snapshot is missing a required schedule or player section.");
+        }
+
+        const dfsRows =
+          parsedDfsBoard === null
+            ? 0
+            : parsedDfsBoard.ready_pitchers.length + parsedDfsBoard.ready_batters.length + parsedDfsBoard.held_players.length;
+        const bettingRows =
+          parsedBettingBoard === null
+            ? 0
+            : parsedBettingBoard.ready_games.length + parsedBettingBoard.held_games.length;
+        const liveScoreboardRows =
+          parsedLiveScoreboard === null ? 0 : parsedLiveScoreboard.games.length;
+        const smokeSignalRows =
+          parsedSmokeSignal === null ? 0 : parsedSmokeSignal.summary.ready_signals;
+
         if (!cancelled) {
           setScheduleState({
-            status: parsed.games.length === 0 ? "empty" : "success",
-            board: parsed,
+            status: parsedScheduleBoard.games.length === 0 ? "empty" : "success",
+            board: parsedScheduleBoard,
             error: null,
+            note: snapshot.schedule.status.reason ?? parsedScheduleBoard.note,
           });
-        }
-      } catch (error) {
-        if (!cancelled && !(error instanceof Error && error.name === "AbortError")) {
-          setScheduleState({
-            status: "error",
-            board: null,
-            error: getErrorMessage(error),
-          });
-        }
-      }
-    };
-
-    const loadPlayers = async (): Promise<void> => {
-      try {
-        const response = await fetch(PLAYER_ROUTE, {
-          cache: "no-store",
-          signal: controller.signal,
-        });
-        const payload = (await response.json()) as unknown;
-
-        if (!response.ok) {
-          throw new Error(readResponseError(payload) ?? `Player board request failed with status ${response.status}.`);
-        }
-
-        const parsed = parsePlayerBoardPayload(payload);
-        if (!cancelled) {
           setPlayerState({
-            status: parsed.players.length === 0 ? "empty" : "success",
-            board: parsed,
+            status: parsedPlayerBoard.players.length === 0 ? "empty" : "success",
+            board: parsedPlayerBoard,
             error: null,
+            note: snapshot.player_projections.status.reason ?? parsedPlayerBoard.note,
           });
-        }
-      } catch (error) {
-        if (!cancelled && !(error instanceof Error && error.name === "AbortError")) {
-          setPlayerState({
-            status: "error",
-            board: null,
-            error: getErrorMessage(error),
-          });
-        }
-      }
-    };
-
-    const loadDfsEdge = async (): Promise<void> => {
-      try {
-        const response = await fetch(DFS_EDGE_ROUTE, {
-          cache: "no-store",
-          signal: controller.signal,
-        });
-        const payload = (await response.json()) as unknown;
-
-        if (!response.ok) {
-          throw new Error(readResponseError(payload) ?? `DFS edge request failed with status ${response.status}.`);
-        }
-
-        const parsed = parseDfsEdgeBoardPayload(payload);
-        const totalRows = parsed.ready_pitchers.length + parsed.ready_batters.length + parsed.held_players.length;
-
-        if (!cancelled) {
           setDfsState({
-            status: totalRows === 0 ? "empty" : "success",
-            board: parsed,
+            status: dfsRows === 0 ? "empty" : "success",
+            board: parsedDfsBoard,
             error: null,
+            note: snapshot.dfs_edge.status.reason ?? parsedDfsBoard?.note ?? null,
           });
-        }
-      } catch (error) {
-        if (!cancelled && !(error instanceof Error && error.name === "AbortError")) {
-          setDfsState({
-            status: "error",
-            board: null,
-            error: getErrorMessage(error),
-          });
-        }
-      }
-    };
-
-    const loadBettingEdge = async (): Promise<void> => {
-      try {
-        const response = await fetch(BETTING_EDGE_ROUTE, {
-          cache: "no-store",
-          signal: controller.signal,
-        });
-        const payload = (await response.json()) as unknown;
-
-        if (!response.ok) {
-          throw new Error(readResponseError(payload) ?? `Betting edge request failed with status ${response.status}.`);
-        }
-
-        const parsed = parseBettingEdgeBoardPayload(payload);
-        const totalRows = parsed.ready_games.length + parsed.held_games.length;
-
-        if (!cancelled) {
           setBettingState({
-            status: totalRows === 0 ? "empty" : "success",
-            board: parsed,
+            status: bettingRows === 0 ? "empty" : "success",
+            board: parsedBettingBoard,
             error: null,
+            note: snapshot.betting_edge.status.reason ?? parsedBettingBoard?.note ?? null,
+          });
+          setLiveScoreboardState({
+            status: liveScoreboardRows === 0 ? "empty" : "success",
+            board: parsedLiveScoreboard,
+            error: null,
+            note: snapshot.live_scoreboard.status.reason ?? parsedLiveScoreboard?.note ?? null,
+          });
+          setSmokeSignalState({
+            status: smokeSignalRows === 0 ? "empty" : "success",
+            board: parsedSmokeSignal,
+            error: null,
+            note: snapshot.smoke_signal.status.reason ?? parsedSmokeSignal?.note ?? null,
           });
         }
       } catch (error) {
         if (!cancelled && !(error instanceof Error && error.name === "AbortError")) {
+          const errorMessage = getErrorMessage(error);
+          setScheduleState({
+            status: "error",
+            board: null,
+            error: errorMessage,
+            note: null,
+          });
+          setPlayerState({
+            status: "error",
+            board: null,
+            error: errorMessage,
+            note: null,
+          });
+          setDfsState({
+            status: "error",
+            board: null,
+            error: errorMessage,
+            note: null,
+          });
           setBettingState({
             status: "error",
             board: null,
-            error: getErrorMessage(error),
+            error: errorMessage,
+            note: null,
+          });
+          setLiveScoreboardState({
+            status: "error",
+            board: null,
+            error: errorMessage,
+            note: null,
+          });
+          setSmokeSignalState({
+            status: "error",
+            board: null,
+            error: errorMessage,
+            note: null,
           });
         }
       }
     };
 
-    loadSchedule().catch((error: unknown) => {
+    loadSnapshot().catch((error: unknown) => {
       if (!cancelled) {
+        const errorMessage = getErrorMessage(error);
         setScheduleState({
           status: "error",
           board: null,
-          error: getErrorMessage(error),
+          error: errorMessage,
+          note: null,
         });
-      }
-    });
-    loadPlayers().catch((error: unknown) => {
-      if (!cancelled) {
         setPlayerState({
           status: "error",
           board: null,
-          error: getErrorMessage(error),
+          error: errorMessage,
+          note: null,
         });
-      }
-    });
-    loadDfsEdge().catch((error: unknown) => {
-      if (!cancelled) {
         setDfsState({
           status: "error",
           board: null,
-          error: getErrorMessage(error),
+          error: errorMessage,
+          note: null,
         });
-      }
-    });
-    loadBettingEdge().catch((error: unknown) => {
-      if (!cancelled) {
         setBettingState({
           status: "error",
           board: null,
-          error: getErrorMessage(error),
+          error: errorMessage,
+          note: null,
+        });
+        setLiveScoreboardState({
+          status: "error",
+          board: null,
+          error: errorMessage,
+          note: null,
+        });
+        setSmokeSignalState({
+          status: "error",
+          board: null,
+          error: errorMessage,
+          note: null,
         });
       }
     });
@@ -1389,7 +1736,13 @@ export function MlbDashboardShell() {
   return (
     <main className="dashboard-page">
       <div className="dashboard-grid">
-        <StatusRail scheduleState={scheduleState} scheduleBoard={scheduleBoard} summary={summary} onOpenGameDetail={setSelectedGameId} />
+        <StatusRail
+          scheduleBoard={scheduleBoard}
+          liveScoreboardState={liveScoreboardState}
+          liveScoreboard={liveScoreboard}
+          summary={summary}
+          onOpenGameDetail={setSelectedGameId}
+        />
 
         <section className="dashboard-main">
           <header className="hero-stage">
@@ -1441,15 +1794,15 @@ export function MlbDashboardShell() {
             {activeTab === "schedule" ? (
               <ScheduleWorkspace scheduleState={scheduleState} scheduleBoard={scheduleBoard} summary={summary} onOpenGameDetail={setSelectedGameId} />
             ) : activeTab === "game-projections" ? (
-              <GameProjectionsWorkspace scheduleState={scheduleState} projectionBoard={projectionBoard} onOpenGameDetail={setSelectedGameId} />
+              <GameProjectionsWorkspace scheduleState={scheduleState} scheduleBoard={scheduleBoard} onOpenGameDetail={setSelectedGameId} />
             ) : activeTab === "player-projections" ? (
-              <PlayerProjectionsWorkspace playerState={playerState} playerProjectionBoard={playerProjectionBoard} />
+              <PlayerProjectionsWorkspace playerState={playerState} playerBoard={playerBoard} />
             ) : activeTab === "dfs-edge" ? (
               <DfsEdgeWorkspace dfsState={dfsState} dfsBoard={dfsBoard} />
             ) : activeTab === "betting-edge" ? (
               <BettingEdgeWorkspace bettingState={bettingState} bettingBoard={bettingBoard} />
             ) : (
-              <PlaceholderWorkspace tabId={activeTab} />
+              <SmokeSignalWorkspace smokeSignalState={smokeSignalState} smokeSignal={smokeSignal} />
             )}
           </div>
         </section>

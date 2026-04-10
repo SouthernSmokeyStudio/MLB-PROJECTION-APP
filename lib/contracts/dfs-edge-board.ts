@@ -74,6 +74,8 @@ export interface DfsEdgeBoardRow {
     readonly draftable_id: string | null;
     readonly salary: number | null;
     readonly value: number | null;
+    readonly projected_ownership: number | null;
+    readonly ownership_source: "placeholder" | "model" | "provider" | null;
     readonly blocked: BlockedState;
   };
 }

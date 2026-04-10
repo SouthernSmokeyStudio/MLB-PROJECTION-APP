@@ -1,7 +1,13 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { DASHBOARD_TABS, MlbDashboardShell, TAB_PLACEHOLDERS } from "@/app/mlb-dashboard-shell";
+import {
+  DASHBOARD_TABS,
+  formatStatusRailBadge,
+  formatStatusRailMatchup,
+  formatStatusRailPrimaryMeta,
+  MlbDashboardShell
+} from "@/app/mlb-dashboard-shell";
 import {
   formatAmericanOdds,
   formatBettingEdgePercent,
@@ -15,18 +21,14 @@ import {
   parseDfsEdgeBoardPayload
 } from "@/lib/dfs-edge-board";
 import {
-  buildGameProjectionBoard,
-  formatProjectedMarginLabel,
-  formatProjectedRuns
-} from "@/lib/game-projection-board";
-import {
-  buildPlayerProjectionBoard
-} from "@/lib/player-projection-board";
-import {
   formatPlayerProjectedPoints,
   formatPlayerProjectionStatus,
   parsePlayerBoardPayload
 } from "@/lib/player-board";
+import {
+  getSlateSnapshotBlockedSections,
+  parseSlateSnapshotPayload
+} from "@/lib/slate-snapshot";
 import {
   formatGeneratedStamp,
   formatScheduledStart,
@@ -340,6 +342,8 @@ const buildSampleDfsEdgeBoardPayload = () => ({
         draftable_id: "42538654",
         salary: 10200,
         value: 2.235294117647059,
+        projected_ownership: 0.334,
+        ownership_source: "placeholder" as const,
         blocked: {
           is_blocked: false,
           blocked_reason: null
@@ -357,6 +361,8 @@ const buildSampleDfsEdgeBoardPayload = () => ({
         draftable_id: "42538655",
         salary: 5600,
         value: 2.267857142857143,
+        projected_ownership: 0.305,
+        ownership_source: "placeholder" as const,
         blocked: {
           is_blocked: false,
           blocked_reason: null
@@ -374,6 +380,8 @@ const buildSampleDfsEdgeBoardPayload = () => ({
         draftable_id: null,
         salary: null,
         value: null,
+        projected_ownership: null,
+        ownership_source: "placeholder" as const,
         blocked: {
           is_blocked: true,
           blocked_reason: "DraftKings Classic salary missing for reconciled player row"
@@ -543,6 +551,229 @@ const buildSampleBettingEdgeBoardPayload = () => ({
   note: null
 });
 
+const buildSampleLiveScoreboardPayload = () => ({
+  source: "mlb-statsapi-live",
+  mode: "live-scoreboard-v1" as const,
+  date: "2026-04-06",
+  generated_at: "2026-04-06T11:48:00Z",
+  summary: {
+    total_games: 2,
+    live_games: 1,
+    final_games: 0,
+    pregame_games: 1,
+    blocked_games: 0
+  },
+  counts: sampleScheduleBoardPayload.counts,
+  games: [
+    {
+      game_id: "mlb-2026-04-06-nyy-bos",
+      matchup: "New York Yankees at Boston Red Sox",
+      scheduled_start: "2026-04-06T23:40:00Z",
+      status: "in_progress" as const,
+      venue_name: "Fenway Park",
+      away_team_id: "nyy",
+      away_team_abbreviation: "NYY",
+      away_team_full_name: "New York Yankees",
+      home_team_id: "bos",
+      home_team_abbreviation: "BOS",
+      home_team_full_name: "Boston Red Sox",
+      away_score: 4,
+      home_score: 3,
+      inning_number: 7,
+      inning_state: "top" as const,
+      is_live: true,
+      is_final: false,
+      display_state: "Top 7th",
+      blocked: {
+        is_blocked: false,
+        blocked_reason: null
+      }
+    },
+    {
+      game_id: "mlb-2026-04-06-atl-phi",
+      matchup: "Atlanta Braves at Philadelphia Phillies",
+      scheduled_start: "2026-04-07T00:15:00Z",
+      status: "pregame" as const,
+      venue_name: "Citizens Bank Park",
+      away_team_id: "atl",
+      away_team_abbreviation: "ATL",
+      away_team_full_name: "Atlanta Braves",
+      home_team_id: "phi",
+      home_team_abbreviation: "PHI",
+      home_team_full_name: "Philadelphia Phillies",
+      away_score: null,
+      home_score: null,
+      inning_number: null,
+      inning_state: null,
+      is_live: false,
+      is_final: false,
+      display_state: "Pre-Game",
+      blocked: {
+        is_blocked: false,
+        blocked_reason: null
+      }
+    }
+  ],
+  note: null
+});
+
+const buildSampleSmokeSignalPayload = () => ({
+  source: "mlb-statsapi-live",
+  mode: "smoke-signal-v1" as const,
+  date: "2026-04-06",
+  generated_at: "2026-04-06T11:48:00Z",
+  summary: {
+    total_sections_considered: 5,
+    ready_signals: 5,
+    blocked_signals: 0
+  },
+  overview: {
+    total_games: 2,
+    projection_ready_games: 1,
+    player_ready_games: 1,
+    live_games: 1,
+    blocked_games: 1
+  },
+  top_projected_total_game: {
+    game_id: "mlb-2026-04-06-nyy-bos",
+    matchup: "New York Yankees at Boston Red Sox",
+    scheduled_start: "2026-04-06T23:40:00Z",
+    status: "scheduled" as const,
+    projected_total: 8.5,
+    away_win_probability: 0.57,
+    home_win_probability: 0.43,
+    blocked: {
+      is_blocked: false,
+      blocked_reason: null
+    }
+  },
+  top_projected_player: {
+    player_id: "gerrit-cole",
+    full_name: "Gerrit Cole",
+    team_abbreviation: "NYY",
+    position: "P" as const,
+    game_id: "mlb-2026-04-06-nyy-bos",
+    matchup: "New York Yankees at Boston Red Sox",
+    projected_points: 22.8,
+    blocked: {
+      is_blocked: false,
+      blocked_reason: null
+    }
+  },
+  top_dfs_value_player: {
+    player_id: "aaron-judge",
+    full_name: "Aaron Judge",
+    team_abbreviation: "NYY",
+    position: "RF" as const,
+    projected_points: 12.7,
+    salary: 5600,
+    value: 2.267857142857143,
+    draft_group_id: "145020",
+    projected_ownership: 0.305,
+    ownership_source: "placeholder" as const
+  },
+  top_betting_edge_side: {
+    game_id: "mlb-2026-04-06-nyy-bos",
+    matchup: "New York Yankees at Boston Red Sox",
+    team_abbreviation: "NYY",
+    team_full_name: "New York Yankees",
+    opponent_team_abbreviation: "BOS",
+    market_odds_american: 110,
+    fair_american_odds: -122,
+    model_probability: 0.55,
+    edge: 0.05
+  },
+  live_pulse: {
+    total_games: 2,
+    live_games: 1,
+    final_games: 0,
+    pregame_games: 1,
+    blocked_games: 0
+  },
+  note: null
+});
+
+const sampleSlateSnapshotPayload = {
+  source: "mlb-statsapi-live",
+  mode: "slate-snapshot-v1" as const,
+  version: 1 as const,
+  date: "2026-04-06",
+  generated_at: "2026-04-06T11:48:00Z",
+  counts: sampleScheduleBoardPayload.counts,
+  publication: {
+    is_complete: true,
+    blocked_sections: [] as const
+  },
+  degradation: {
+    schedule: {
+      state: "ready" as const,
+      reason: null
+    },
+    player_projections: {
+      state: "ready" as const,
+      reason: null
+    },
+    dfs_edge: {
+      state: "partial" as const,
+      reason: null
+    },
+    betting_edge: {
+      state: "partial" as const,
+      reason: null
+    },
+    smoke_signal: {
+      state: "ready" as const,
+      reason: null
+    },
+    live_scoreboard: {
+      state: "ready" as const,
+      reason: null
+    }
+  },
+  schedule: {
+    status: {
+      state: "ready" as const,
+      reason: null
+    },
+    payload: sampleScheduleBoardPayload
+  },
+  player_projections: {
+    status: {
+      state: "ready" as const,
+      reason: null
+    },
+    payload: samplePlayerBoardPayload
+  },
+  dfs_edge: {
+    status: {
+      state: "partial" as const,
+      reason: null
+    },
+    payload: buildSampleDfsEdgeBoardPayload()
+  },
+  betting_edge: {
+    status: {
+      state: "partial" as const,
+      reason: null
+    },
+    payload: buildSampleBettingEdgeBoardPayload()
+  },
+  smoke_signal: {
+    status: {
+      state: "ready" as const,
+      reason: null
+    },
+    payload: buildSampleSmokeSignalPayload()
+  },
+  live_scoreboard: {
+    status: {
+      state: "ready" as const,
+      reason: null
+    },
+    payload: buildSampleLiveScoreboardPayload()
+  }
+};
+
 describe("app surface shell", () => {
   it("renders the branded shell with schedule-first navigation", () => {
     const html = renderToStaticMarkup(createElement(MlbDashboardShell));
@@ -570,23 +801,6 @@ describe("app surface shell", () => {
     expect(payload.games[1]?.projection.blocked.is_blocked).toBe(true);
   });
 
-  it("derives a projection-focused board from the live schedule payload", () => {
-    const payload = parseScheduleBoardPayload(sampleScheduleBoardPayload);
-    const projectionBoard = buildGameProjectionBoard(payload);
-
-    expect(projectionBoard.summary.projection_ready_games).toBe(1);
-    expect(projectionBoard.summary.games_ready_for_player_projections).toBe(1);
-    expect(projectionBoard.summary.blocked_games).toBe(1);
-    expect(projectionBoard.summary.highest_total?.value).toBe(8.5);
-    expect(projectionBoard.summary.strongest_favorite?.team_abbreviation).toBe("NYY");
-    expect(projectionBoard.games[0]?.blocked.is_blocked).toBe(false);
-    expect(projectionBoard.games[1]?.blocked.is_blocked).toBe(true);
-    expect(formatProjectedRuns(projectionBoard.games[0]?.projected_away_runs ?? null)).toBe(
-      "4.6"
-    );
-    expect(formatProjectedMarginLabel(projectionBoard.games[0]!)).toBe("NYY +0.7 runs");
-  });
-
   it("parses the player board payload into the player surface model", () => {
     const payload = parsePlayerBoardPayload(samplePlayerBoardPayload);
 
@@ -596,18 +810,8 @@ describe("app surface shell", () => {
     expect(payload.summary.blocked_players).toBe(1);
     expect(payload.players[0]?.full_name).toBe("Gerrit Cole");
     expect(payload.players[2]?.projection.blocked.is_blocked).toBe(true);
-  });
-
-  it("derives a player-focused board from the live player payload", () => {
-    const payload = parsePlayerBoardPayload(samplePlayerBoardPayload);
-    const playerBoard = buildPlayerProjectionBoard(payload);
-
-    expect(playerBoard.summary.ready_pitchers).toBe(1);
-    expect(playerBoard.summary.ready_batters).toBe(1);
-    expect(playerBoard.held_players).toHaveLength(1);
-    expect(playerBoard.summary.top_projected_player?.full_name).toBe("Gerrit Cole");
-    expect(formatPlayerProjectedPoints(playerBoard.ready_pitchers[0]!)).toBe("22.8");
-    expect(formatPlayerProjectionStatus(playerBoard.held_players[0]!)).toBe("Held");
+    expect(formatPlayerProjectedPoints(payload.players[0]!)).toBe("22.8");
+    expect(formatPlayerProjectionStatus(payload.players[2]!)).toBe("Held");
   });
 
   it("parses the DFS edge payload into the DraftKings Classic surface model", () => {
@@ -620,14 +824,13 @@ describe("app surface shell", () => {
     expect(payload.ready_pitchers).toHaveLength(1);
     expect(payload.ready_batters).toHaveLength(1);
     expect(payload.held_players).toHaveLength(1);
+    expect(payload.ready_pitchers[0]?.draftkings_classic.ownership_source).toBe("placeholder");
+    expect(payload.ready_batters[0]?.draftkings_classic.projected_ownership).toBe(0.305);
+    expect(payload.held_players[0]?.draftkings_classic.projected_ownership).toBeNull();
     expect(formatDfsEdgeStatus(payload.ready_pitchers[0]!)).toBe("DraftKings-ready");
     expect(formatDfsEdgeStatus(payload.held_players[0]!)).toBe("Held");
-    expect(formatDraftKingsClassicSalary(payload.ready_pitchers[0]!.draftkings_classic.salary)).toBe(
-      "$10,200"
-    );
-    expect(formatDraftKingsClassicValue(payload.ready_batters[0]!.draftkings_classic.value)).toBe(
-      "2.27 pts/$1k"
-    );
+    expect(formatDraftKingsClassicSalary(payload.ready_pitchers[0]!.draftkings_classic.salary)).toBe("$10,200");
+    expect(formatDraftKingsClassicValue(payload.ready_batters[0]!.draftkings_classic.value)).toBe("2.27 pts/$1k");
   });
 
   it("parses the betting edge payload into the DraftKings Sportsbook surface model", () => {
@@ -641,18 +844,57 @@ describe("app surface shell", () => {
     expect(payload.held_games).toHaveLength(1);
     expect(formatBettingEdgeStatus(payload.ready_games[0]!)).toBe("Moneyline-ready");
     expect(formatBettingEdgeStatus(payload.held_games[0]!)).toBe("Held");
-    expect(formatAmericanOdds(payload.ready_games[0]!.draftkings_sportsbook_moneyline.away.market_odds_american)).toBe(
-      "+110"
-    );
-    expect(formatBettingEdgePercent(payload.ready_games[0]!.draftkings_sportsbook_moneyline.away.edge)).toBe(
-      "+5.0% edge"
-    );
+    expect(formatAmericanOdds(payload.ready_games[0]!.draftkings_sportsbook_moneyline.away.market_odds_american)).toBe("+110");
+    expect(formatBettingEdgePercent(payload.ready_games[0]!.draftkings_sportsbook_moneyline.away.edge)).toBe("+5.0% edge");
   });
 
-  it("keeps the non-live tabs explicitly honest", () => {
-    expect(Object.prototype.hasOwnProperty.call(TAB_PLACEHOLDERS, "dfs-edge")).toBe(false);
-    expect(Object.prototype.hasOwnProperty.call(TAB_PLACEHOLDERS, "betting-edge")).toBe(false);
-    expect(TAB_PLACEHOLDERS["smoke-signal"].body).toContain("signal content");
+  it("parses the canonical snapshot payload into wrapped board sections", () => {
+    const snapshot = parseSlateSnapshotPayload(sampleSlateSnapshotPayload);
+
+    expect(snapshot.mode).toBe("slate-snapshot-v1");
+    expect(snapshot.schedule.payload?.mode).toBe("schedule-board-v1");
+    expect(snapshot.player_projections.payload?.mode).toBe("player-board-v1");
+    expect(snapshot.dfs_edge.payload?.mode).toBe("dfs-edge-board-v1");
+    expect(snapshot.betting_edge.payload?.mode).toBe("betting-edge-board-v1");
+    expect(snapshot.smoke_signal.payload?.mode).toBe("smoke-signal-v1");
+    expect(snapshot.live_scoreboard.payload?.mode).toBe("live-scoreboard-v1");
+    expect(snapshot.smoke_signal.status.state).toBe("ready");
+    expect(snapshot.smoke_signal.payload?.top_dfs_value_player?.ownership_source).toBe("placeholder");
+    expect(snapshot.live_scoreboard.status.state).toBe("ready");
+    expect(snapshot.live_scoreboard.payload?.games[0]?.display_state).toBe("Top 7th");
+    expect(getSlateSnapshotBlockedSections(snapshot)).toEqual([]);
+  });
+
+  it("formats left-rail live-scoreboard rows without inventing score state", () => {
+    const liveScoreboard = parseSlateSnapshotPayload(sampleSlateSnapshotPayload).live_scoreboard.payload!;
+    const liveGame = liveScoreboard.games[0]!;
+    const scheduledGame = liveScoreboard.games[1]!;
+    const blockedGame: typeof scheduledGame = {
+      ...scheduledGame,
+      status: "in_progress" as const,
+      display_state: null,
+      blocked: {
+        is_blocked: true,
+        blocked_reason: "Live score state is missing inning context for an in-progress game."
+      }
+    };
+
+    expect(formatStatusRailMatchup(liveGame)).toBe("NYY 4 at BOS 3");
+    expect(formatStatusRailBadge(liveGame)).toBe("Top 7th");
+    expect(formatStatusRailPrimaryMeta(liveGame)).toBe("Top 7th");
+
+    expect(formatStatusRailMatchup(scheduledGame)).toBe("ATL at PHI");
+    expect(formatStatusRailBadge(scheduledGame)).toBe("Pregame");
+    expect(formatStatusRailPrimaryMeta(scheduledGame)).toContain("CT");
+
+    expect(formatStatusRailBadge(blockedGame)).toBe("Score blocked");
+    expect(formatStatusRailPrimaryMeta(blockedGame)).toContain("missing inning context");
+  });
+
+  it("keeps the shell formatting helpers honest", () => {
+    expect(buildSampleSmokeSignalPayload().top_projected_total_game?.projected_total).toBe(8.5);
+    expect(buildSampleSmokeSignalPayload().top_projected_player?.projected_points).toBe(22.8);
+    expect(buildSampleSmokeSignalPayload().top_dfs_value_player?.ownership_source).toBe("placeholder");
     expect(formatGeneratedStamp("2026-04-04T12:00:00Z")).toBe("APR 04 | 12:00 UTC");
     expect(formatScheduledStart("2026-04-06T23:40:00Z")).toContain("CT");
   });

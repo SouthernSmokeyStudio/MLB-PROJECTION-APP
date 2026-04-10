@@ -14,3 +14,6 @@ export * from "./draftkings-classic";
 export * from "./draftkings-sportsbook-mlb-moneyline";
 export * from "./betting-edge-board";
 export * from "./dfs-edge-board";
+export * from "./live-scoreboard";
+export * from "./smoke-signal";
+export * from "./slate-snapshot";

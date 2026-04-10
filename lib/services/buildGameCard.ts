@@ -11,6 +11,7 @@ import {
   assembleGameProjection,
   type AssembledGameProjection
 } from "@lib/projections/assembleGameProjection";
+import type { PitcherProjection } from "@lib/contracts/projections";
 import { simulateGames } from "@lib/simulation/simulateGames";
 
 export interface GameCardMarketInput {
@@ -44,6 +45,8 @@ export interface GameCard {
     readonly projected_away_runs: number | null;
     readonly projected_home_runs: number | null;
     readonly projected_total: number | null;
+    readonly away_pitcher: PitcherProjection | null;
+    readonly home_pitcher: PitcherProjection | null;
   };
   readonly simulation: {
     readonly derived_from: "simulation";
@@ -135,7 +138,9 @@ export const buildGameCard = (
       derived_from: "deterministic",
       projected_away_runs: blocked.is_blocked ? null : gameProjection.away.projected_runs,
       projected_home_runs: blocked.is_blocked ? null : gameProjection.home.projected_runs,
-      projected_total: blocked.is_blocked ? null : gameProjection.projected_total
+      projected_total: blocked.is_blocked ? null : gameProjection.projected_total,
+      away_pitcher: blocked.is_blocked ? null : assembled.away_pitcher,
+      home_pitcher: blocked.is_blocked ? null : assembled.home_pitcher
     },
     simulation: simulations
       ? {

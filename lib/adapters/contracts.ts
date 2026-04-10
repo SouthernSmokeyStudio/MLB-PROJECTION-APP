@@ -30,6 +30,22 @@ export interface MlbStatsApiVenue {
   readonly name: string;
 }
 
+export interface MlbStatsApiLinescoreTeam {
+  readonly runs: number | null;
+}
+
+export interface MlbStatsApiLinescore {
+  readonly currentInning: number | null;
+  readonly currentInningOrdinal: string | null;
+  readonly inningState: string | null;
+  readonly inningHalf: string | null;
+  readonly isTopInning: boolean | null;
+  readonly teams: {
+    readonly away: MlbStatsApiLinescoreTeam;
+    readonly home: MlbStatsApiLinescoreTeam;
+  };
+}
+
 export interface MlbStatsApiScheduleGame {
   readonly gamePk: number;
   readonly gameDate: string;

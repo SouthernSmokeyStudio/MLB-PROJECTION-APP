@@ -9,7 +9,6 @@ import { buildGameCard } from "../../lib/services/buildGameCard";
 import { buildPlayerCards } from "../../lib/services/buildPlayerCard";
 import { buildPlayerBoard } from "../../lib/services/buildPlayerBoard";
 import { buildScheduleBoard } from "../../lib/services/buildScheduleBoard";
-import { buildSlateView } from "../../lib/services/buildSlateView";
 
 const prepared = preparedFixture as unknown as PreparedGameInputs;
 const invalidPrepared = invalidPreparedFixture as unknown as PreparedGameInputs;
@@ -94,20 +93,6 @@ describe("phase 9 services", () => {
     expect(result.players.some((player) => player.deterministic_summary !== null)).toBe(true);
   });
 
-  it("builds a grouped slate view with only app-surface fields", () => {
-    const slate = buildSlateView([prepared], {
-      simulation: {
-        seed: 7,
-        iterations: 100
-      }
-    });
-
-    expect(slate.games).toHaveLength(1);
-    expect(slate.players.length).toBeGreaterThan(0);
-    expect(Object.keys(slate.players_by_game_id)).toContain(prepared.game_id);
-    expect(slate.blocked.games_blocked).toBe(0);
-  });
-
   it("builds a schedule board contract from real route-backed fields", () => {
     const parsed = parseMlbStatsApiGamePayload(rawFixture);
     expect(parsed.success).toBe(true);
@@ -181,6 +166,15 @@ describe("phase 9 services", () => {
           parsedGame: parsed.data,
           canonicalGame: normalized.data,
           preparedGame: prepared,
+          liveScoreState: {
+            away_score: null,
+            home_score: null,
+            inning_number: null,
+            inning_state: null,
+            is_live: false,
+            is_final: false,
+            display_state: "Scheduled"
+          },
           playerIdentities: {
             "gerrit-cole": {
               player_id: "gerrit-cole" as never,

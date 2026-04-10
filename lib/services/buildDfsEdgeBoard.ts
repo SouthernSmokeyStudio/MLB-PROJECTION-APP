@@ -16,6 +16,7 @@ import {
   buildDraftKingsClassicPlayerCards,
   type DraftKingsClassicPlayerCard
 } from "./joinDraftKingsClassicSalaries";
+import { buildDfsOwnershipPlaceholder } from "./buildDfsOwnershipPlaceholder";
 import type { LiveSlateCounts, LiveSlateSourceGame } from "./loadLiveSlate";
 
 export interface BuildDfsEdgeBoardOptions {
@@ -181,6 +182,13 @@ const toDfsEdgeBoardRow = (
     ? sourceGame.canonicalGame.home.team
     : sourceGame.canonicalGame.away.team;
   const identity = sourceGame.playerIdentities[player.player_id];
+  const placeholderOwnership = buildDfsOwnershipPlaceholder({
+    position: identity?.position ?? buildFallbackPosition(player),
+    batting_order: identity?.batting_order ?? null,
+    projected_points: player.fantasy_summary?.projected_points ?? null,
+    salary: player.fantasy_summary?.salary ?? null,
+    is_blocked: player.draftkings_classic.blocked.is_blocked
+  });
 
   return {
     player_id: asPlayerId(player.player_id),
@@ -212,6 +220,8 @@ const toDfsEdgeBoardRow = (
       draftable_id: player.draftkings_classic.draftable_id,
       salary: player.fantasy_summary?.salary ?? null,
       value: player.fantasy_summary?.value ?? null,
+      projected_ownership: placeholderOwnership.projected_ownership,
+      ownership_source: placeholderOwnership.ownership_source,
       blocked: player.draftkings_classic.blocked
     }
   };
