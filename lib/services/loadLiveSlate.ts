@@ -18,6 +18,7 @@ import {
   type PlayerPosition,
   type Result
 } from "@lib/contracts/types";
+import type { MaterializedSlate } from "@lib/contracts/materialized-slate";
 import { normalizeMlbStatsApiGame } from "@lib/normalization/mlbStatsApiNormalizer";
 import type { GamePreparationData } from "@lib/preparation";
 import { prepareGameInputs } from "@lib/preparation";
@@ -517,7 +518,31 @@ export const buildLiveSlateScoreState = ({
 
 export const getUtcDateString = (): string => new Date().toISOString().slice(0, 10);
 
-export const loadLiveSlate = async (date: string): Promise<Result<LoadedLiveSlate, string>> => {
+export interface LoadLiveSlateOptions {
+  readonly materializedBaseline?: MaterializedSlate | undefined;
+}
+
+/** Artifacts older than this threshold are rejected at the load boundary. */
+const MATERIALIZED_STALE_THRESHOLD_MS = 24 * 60 * 60 * 1000;
+
+const isMaterializedStale = (baseline: MaterializedSlate): boolean => {
+  const ageMs = Date.now() - new Date(baseline.generated_at).getTime();
+  return ageMs > MATERIALIZED_STALE_THRESHOLD_MS;
+};
+
+export const loadLiveSlate = async (
+  date: string,
+  options?: LoadLiveSlateOptions
+): Promise<Result<LoadedLiveSlate, string>> => {
+  // Fail-closed: reject stale baselines regardless of what the caller passed.
+  // This ensures no future caller can accidentally feed stale data.
+  const baseline =
+    options?.materializedBaseline && !isMaterializedStale(options.materializedBaseline)
+      ? options.materializedBaseline
+      : undefined;
+  const materializedLookup = new Map(
+    (baseline?.games ?? []).map((g) => [g.game_id, g.prepared])
+  );
   const fetched = await fetchAndParseMlbStatsApiSchedule(date);
   const generatedAt = new Date().toISOString();
 
@@ -592,7 +617,13 @@ export const loadLiveSlate = async (date: string): Promise<Result<LoadedLiveSlat
       boxscore: boxscorePayload,
       linescore: linescorePayload
     });
-    let preparedGame = prepareGameInputs(game.normalizedGame);
+    // When a materialized baseline has a matching game, use it as the
+    // initial preparedGame.  If live boxscore enrichment succeeds below,
+    // it fully overrides this with fresh data.  When no baseline match
+    // exists, this is identical to the pre-A2 path.
+    let preparedGame =
+      materializedLookup.get(game.normalizedGame.game_id) ??
+      prepareGameInputs(game.normalizedGame);
 
     if (fetchedBoxscore.success) {
       const extracted = extractPreparedGameDataFromBoxscore(

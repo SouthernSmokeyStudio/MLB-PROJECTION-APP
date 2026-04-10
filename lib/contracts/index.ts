@@ -17,3 +17,4 @@ export * from "./dfs-edge-board";
 export * from "./live-scoreboard";
 export * from "./smoke-signal";
 export * from "./slate-snapshot";
+export * from "./materialized-slate";

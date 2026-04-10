@@ -21,7 +21,11 @@ vi.mock("@lib/services", async () => {
     getUtcDateString: () => "2026-03-27",
     loadLiveSlate: vi.fn(),
     loadDraftKingsClassicSlate: vi.fn(),
-    loadDraftKingsSportsbookMlbMoneylineSlate: vi.fn()
+    loadDraftKingsSportsbookMlbMoneylineSlate: vi.fn(),
+    loadMaterializedSlate: vi.fn().mockResolvedValue({
+      success: false,
+      error: "No materialized slate artifact found"
+    })
   };
 });
 
@@ -229,7 +233,7 @@ describe("/api/slate-snapshot route", () => {
     const payload = (await response.json()) as Record<string, unknown>;
 
     expect(response.status).toBe(200);
-    expect(loadLiveSlate).toHaveBeenCalledWith("2026-03-27");
+    expect(loadLiveSlate).toHaveBeenCalledWith("2026-03-27", expect.objectContaining({ materializedBaseline: undefined }));
     expect(loadDraftKingsClassicSlate).toHaveBeenCalledWith({
       date: "2026-03-27"
     });

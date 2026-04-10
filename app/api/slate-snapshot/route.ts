@@ -5,7 +5,8 @@ import {
   getUtcDateString,
   loadDraftKingsClassicSlate,
   loadDraftKingsSportsbookMlbMoneylineSlate,
-  loadLiveSlate
+  loadLiveSlate,
+  loadMaterializedSlate
 } from "@lib/services";
 
 const DEFAULT_SIMULATION = {
@@ -21,8 +22,19 @@ const BETTING_EDGE_LABEL = "DraftKings Sportsbook MLB Pregame Moneyline";
 export async function GET(request: NextRequest): Promise<Response> {
   const date = request.nextUrl.searchParams.get("date") ?? getUtcDateString();
   const draftGroupId = request.nextUrl.searchParams.get("draft_group_id") ?? undefined;
+  // Attempt to load a materialized baseline.  This is a local file read
+  // that fails silently when no artifact exists — the live pipeline is the
+  // sole authority and the baseline only supplements the initial fallback.
+  // Fail-closed: stale artifacts (>24h) are rejected — they must NOT be
+  // used as a baseline.
+  const materializedResult = await loadMaterializedSlate(date);
+  const materializedBaseline =
+    materializedResult.success && !materializedResult.data.metadata.is_stale
+      ? materializedResult.data.slate
+      : undefined;
+
   const [loadedLiveSlate, loadedDraftKingsSlate, loadedMoneylineSlate] = await Promise.all([
-    loadLiveSlate(date),
+    loadLiveSlate(date, { materializedBaseline }),
     loadDraftKingsClassicSlate(
       draftGroupId
         ? {

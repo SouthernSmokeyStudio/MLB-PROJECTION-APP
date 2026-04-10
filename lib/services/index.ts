@@ -9,6 +9,7 @@ export * from "./buildSmokeSignal";
 export * from "./buildScheduleBoard";
 export * from "./buildPlayerBoard";
 export * from "./loadLiveSlate";
+export * from "./loadMaterializedSlate";
 export * from "./loadDraftKingsClassicSlate";
 export * from "./loadDraftKingsSportsbookMlbMoneylineSlate";
 export * from "./checkProjectionReconciliation";
