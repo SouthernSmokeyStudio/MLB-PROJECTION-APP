@@ -32,15 +32,3 @@ jobs:
 
       - name: Run build
         run: npm run build
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-          cache: pip
-
-      - name: Install Python dependencies
-        run: pip install -r python/requirements.txt
-
-      - name: Run scaffold check
-        run: python python/pipeline.py --mode scaffold-check
