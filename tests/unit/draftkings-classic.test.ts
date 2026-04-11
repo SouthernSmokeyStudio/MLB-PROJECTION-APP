@@ -91,7 +91,7 @@ const makeSalarySlate = (
  * Each entry gets a DK numeric player_id and the provided display_name.
  */
 const makeSalarySlateWithNames = (
-  entries: readonly { displayName: string; salary?: number }[]
+  entries: readonly { displayName: string; salary?: number; team?: string }[]
 ): DraftKingsClassicSalarySlate => ({
   provider: "draftkings",
   contest_type: "classic",
@@ -111,7 +111,7 @@ const makeSalarySlateWithNames = (
     position: index < 2 ? "SP" : "OF",
     roster_slot_id: index < 2 ? 110 : 200,
     salary: entry.salary ?? 5000 + index * 200,
-    team_abbreviation: index % 2 === 0 ? "NYY" : "BOS",
+    team_abbreviation: entry.team ?? (index % 2 === 0 ? "NYY" : "BOS"),
     competition_id: "6157701",
     competition_name: "NYY @ BOS",
     competition_start: asISOTimestamp("2026-03-27T19:05:00Z")
@@ -560,8 +560,8 @@ describe("DraftKings Classic salary join", () => {
 
       // DK salary slate with numeric player_ids and real display names
       const salarySlate = makeSalarySlateWithNames([
-        { displayName: "Gerrit Cole", salary: 10200 },
-        { displayName: "Juan Soto", salary: 5800 }
+        { displayName: "Gerrit Cole", salary: 10200, team: pitcher.team_id.toUpperCase() },
+        { displayName: "Juan Soto", salary: 5800, team: batter.team_id.toUpperCase() }
       ]);
 
       const testGame: typeof game = {
@@ -588,6 +588,92 @@ describe("DraftKings Classic salary join", () => {
       const joinedBatter = result.players.find((p) => p.player_id === "juan-soto");
       expect(joinedBatter!.draftkings_classic.blocked.is_blocked).toBe(false);
       expect(joinedBatter!.fantasy_summary?.salary).toBe(5800);
+    });
+
+    it("MLB-backed batter joins by unique full-name and exact team when DK ID differs", () => {
+      const game = buildGameCard(prepared);
+      const realPlayers = buildPlayerCards(prepared).players;
+      const realBatter = realPlayers.find((p) => p.deterministic_summary?.kind === "batter");
+      if (!realBatter) {
+        throw new Error("Fixture must produce at least one batter");
+      }
+
+      const batter: PlayerCard = {
+        ...realBatter,
+        player_id: "656941",
+        mlb_stats_api_id: "656941",
+        team_id: "phi"
+      };
+      const salarySlate = makeSalarySlateWithNames([
+        { displayName: "Kyle Schwarber", salary: 6000, team: "PHI" }
+      ]);
+      const dkSalarySlate: DraftKingsClassicSalarySlate = {
+        ...salarySlate,
+        salaries: salarySlate.salaries.map((entry) => ({
+          ...entry,
+          player_id: asPlayerId("709545")
+        }))
+      };
+
+      const result = joinDraftKingsClassicSalaries({
+        game: {
+          ...game,
+          away_team_id: "ari",
+          home_team_id: "phi"
+        },
+        players: [batter],
+        salary_slate: dkSalarySlate,
+        salaryJoinIdentities: {
+          "656941": {
+            full_name: "Kyle Schwarber",
+            team_abbreviation: "PHI"
+          }
+        }
+      });
+
+      expect(result.ready_players).toBe(1);
+      expect(result.held_players).toBe(0);
+      expect(result.players[0]!.draftkings_classic.blocked.is_blocked).toBe(false);
+      expect(result.players[0]!.fantasy_summary?.salary).toBe(6000);
+    });
+
+    it("full-name fallback requires an exact team match", () => {
+      const game = buildGameCard(prepared);
+      const realPlayers = buildPlayerCards(prepared).players;
+      const realBatter = realPlayers.find((p) => p.deterministic_summary?.kind === "batter");
+      if (!realBatter) {
+        throw new Error("Fixture must produce at least one batter");
+      }
+
+      const batter: PlayerCard = {
+        ...realBatter,
+        player_id: "656941",
+        mlb_stats_api_id: "656941",
+        team_id: "phi"
+      };
+      const salarySlate = makeSalarySlateWithNames([
+        { displayName: "Kyle Schwarber", salary: 6000, team: "NYY" }
+      ]);
+      const result = joinDraftKingsClassicSalaries({
+        game: {
+          ...game,
+          away_team_id: "ari",
+          home_team_id: "phi"
+        },
+        players: [batter],
+        salary_slate: salarySlate,
+        salaryJoinIdentities: {
+          "656941": {
+            full_name: "Kyle Schwarber",
+            team_abbreviation: "PHI"
+          }
+        }
+      });
+
+      expect(result.ready_players).toBe(0);
+      expect(result.held_players).toBe(1);
+      expect(result.players[0]!.draftkings_classic.blocked.is_blocked).toBe(true);
+      expect(result.players[0]!.fantasy_summary?.salary).toBeNull();
     });
 
     it("periods and hyphens normalize correctly for abbreviated names", () => {
@@ -809,8 +895,8 @@ describe("DraftKings Classic salary join", () => {
 
       // Two DK salary entries that normalize to the same name → ambiguous
       const salarySlate = makeSalarySlateWithNames([
-        { displayName: "Chris Martin", salary: 6000 },
-        { displayName: "Chris Martin", salary: 7500 }
+        { displayName: "Chris Martin", salary: 6000, team: pitcher.team_id.toUpperCase() },
+        { displayName: "Chris Martin", salary: 7500, team: pitcher.team_id.toUpperCase() }
       ]);
 
       const testGame: typeof game = {
@@ -852,8 +938,8 @@ describe("DraftKings Classic salary join", () => {
 
       // Two DK entries normalize to same name → ambiguous, but primary ID join should win
       const salarySlate = makeSalarySlateWithNames([
-        { displayName: "Chris Martin", salary: 6000 },
-        { displayName: "Chris Martin", salary: 7500 }
+        { displayName: "Chris Martin", salary: 6000, team: pitcher.team_id.toUpperCase() },
+        { displayName: "Chris Martin", salary: 7500, team: pitcher.team_id.toUpperCase() }
       ]);
 
       const testGame: typeof game = {
@@ -900,9 +986,9 @@ describe("DraftKings Classic salary join", () => {
       };
 
       const salarySlate = makeSalarySlateWithNames([
-        { displayName: "Chris Martin", salary: 6000 },
-        { displayName: "Chris Martin", salary: 7500 },
-        { displayName: "Juan Soto", salary: 5800 }
+        { displayName: "Chris Martin", salary: 6000, team: ambiguousPlayer.team_id.toUpperCase() },
+        { displayName: "Chris Martin", salary: 7500, team: ambiguousPlayer.team_id.toUpperCase() },
+        { displayName: "Juan Soto", salary: 5800, team: uniquePlayer.team_id.toUpperCase() }
       ]);
 
       const testGame: typeof game = {
@@ -1303,7 +1389,7 @@ describe("DraftKings Classic salary join", () => {
       ]));
 
       const salarySlate = makeDkSalarySlate([
-        { dkPlayerId: "DK-COLE-99", salary: 10200, displayName: "Gerrit Cole", team: "NYY" }
+        { dkPlayerId: "DK-COLE-99", salary: 10200, displayName: "Unlinked Pitcher", team: "NYY" }
       ]);
 
       const result = joinDraftKingsClassicSalaries({

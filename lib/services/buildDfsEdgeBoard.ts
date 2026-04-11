@@ -14,7 +14,8 @@ import {
 } from "@lib/contracts/types";
 import {
   buildDraftKingsClassicPlayerCards,
-  type DraftKingsClassicPlayerCard
+  type DraftKingsClassicPlayerCard,
+  type DraftKingsClassicSalaryJoinIdentities
 } from "./joinDraftKingsClassicSalaries";
 import { buildDfsOwnershipPlaceholder } from "./buildDfsOwnershipPlaceholder";
 import type { LiveSlateCounts, LiveSlateSourceGame } from "./loadLiveSlate";
@@ -230,17 +231,73 @@ const toDfsEdgeBoardRow = (
   };
 };
 
+const buildSalaryJoinIdentities = (
+  sourceGame: LiveSlateSourceGame
+): DraftKingsClassicSalaryJoinIdentities => {
+  const teamAbbreviationByPlayerId = new Map<string, string>();
+
+  for (const player of [
+    ...sourceGame.preparedGame.away_batters,
+    sourceGame.preparedGame.away_starter
+  ]) {
+    if (player) {
+      teamAbbreviationByPlayerId.set(
+        player.player_id,
+        sourceGame.canonicalGame.away.team.abbreviation
+      );
+    }
+  }
+
+  for (const player of [
+    ...sourceGame.preparedGame.home_batters,
+    sourceGame.preparedGame.home_starter
+  ]) {
+    if (player) {
+      teamAbbreviationByPlayerId.set(
+        player.player_id,
+        sourceGame.canonicalGame.home.team.abbreviation
+      );
+    }
+  }
+
+  return Object.fromEntries(
+    Object.entries(sourceGame.playerIdentities)
+      .map(([playerId, identity]) => {
+        const teamAbbreviation = teamAbbreviationByPlayerId.get(playerId);
+        return teamAbbreviation
+          ? [
+              playerId,
+              {
+                full_name: identity.full_name,
+                team_abbreviation: teamAbbreviation
+              }
+            ]
+          : null;
+      })
+      .filter(
+        (
+          entry
+        ): entry is [
+          string,
+          { readonly full_name: string | null; readonly team_abbreviation: string }
+        ] => entry !== null
+      )
+  );
+};
+
 const buildRows = (
   sourceGames: readonly LiveSlateSourceGame[],
   options: BuildDfsEdgeBoardOptions
 ): readonly DfsEdgeBoardRow[] =>
   sourceGames.flatMap((sourceGame) => {
+    const salaryJoinIdentities = buildSalaryJoinIdentities(sourceGame);
     const joinedPlayers = buildDraftKingsClassicPlayerCards(
       sourceGame.preparedGame,
       options.salary_slate,
       {
         ...(options.simulation ? { simulation: options.simulation } : {}),
-        ...(options.crosswalk ? { crosswalk: options.crosswalk } : {})
+        ...(options.crosswalk ? { crosswalk: options.crosswalk } : {}),
+        ...(Object.keys(salaryJoinIdentities).length > 0 ? { salaryJoinIdentities } : {})
       }
     ).players;
 

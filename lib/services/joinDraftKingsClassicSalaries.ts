@@ -19,12 +19,22 @@ export interface DraftKingsClassicPlayerCard extends PlayerCard {
   readonly draftkings_classic: DraftKingsClassicJoinState;
 }
 
+export interface DraftKingsClassicSalaryJoinIdentity {
+  readonly full_name: string | null;
+  readonly team_abbreviation: string;
+}
+
+export type DraftKingsClassicSalaryJoinIdentities = Readonly<
+  Record<string, DraftKingsClassicSalaryJoinIdentity>
+>;
+
 export interface JoinDraftKingsClassicSalariesInput {
   readonly game: GameCard;
   readonly players: readonly PlayerCard[];
   readonly salary_slate: DraftKingsClassicSalarySlate;
   /** When provided, salary join uses crosswalk-driven resolution instead of legacy fallback. */
   readonly crosswalk?: IndexedCrosswalk;
+  readonly salaryJoinIdentities?: DraftKingsClassicSalaryJoinIdentities;
 }
 
 export interface DraftKingsClassicPlayerCardsResult {
@@ -49,6 +59,17 @@ export const normalizeNameForJoin = (name: string): string =>
     .replace(/[\u0300-\u036f]/g, "")     // strip combining marks
     .replace(/[^a-zA-Z]/g, "")           // strip everything except ASCII letters
     .toLowerCase();
+
+const buildNameTeamKey = (name: string, teamAbbreviation: string): string | null => {
+  const normalizedName = normalizeNameForJoin(name);
+  const normalizedTeam = teamAbbreviation.trim().toUpperCase();
+
+  if (normalizedName.length === 0 || normalizedTeam.length === 0) {
+    return null;
+  }
+
+  return `${normalizedName}::${normalizedTeam}`;
+};
 
 const deriveDraftKingsClassicValue = (
   projectedPoints: number,
@@ -146,11 +167,37 @@ const matchSalaryViaCrosswalk = (
   return salaryEntry ?? null;
 };
 
+const matchSalaryByNameAndTeam = (
+  player: PlayerCard,
+  salaryJoinIdentities: DraftKingsClassicSalaryJoinIdentities | undefined,
+  salaryByNormalizedNameAndTeam: ReadonlyMap<
+    string,
+    DraftKingsClassicSalarySlate["salaries"][number] | null
+  >
+): DraftKingsClassicSalarySlate["salaries"][number] | null => {
+  const identity = salaryJoinIdentities?.[player.player_id];
+  const playerName = identity?.full_name ?? (salaryJoinIdentities ? null : player.player_id);
+  const teamAbbreviation =
+    identity?.team_abbreviation ?? (salaryJoinIdentities ? null : player.team_id.toUpperCase());
+
+  if (!playerName || !teamAbbreviation) {
+    return null;
+  }
+
+  const key = buildNameTeamKey(playerName, teamAbbreviation);
+  if (key === null) {
+    return null;
+  }
+
+  return salaryByNormalizedNameAndTeam.get(key) ?? null;
+};
+
 export const joinDraftKingsClassicSalaries = ({
   game,
   players,
   salary_slate,
-  crosswalk
+  crosswalk,
+  salaryJoinIdentities
 }: JoinDraftKingsClassicSalariesInput): DraftKingsClassicPlayerCardsResult => {
   const reconciliation = checkProjectionReconciliation({ game, players });
   const draftGroupId = salary_slate.draft_group_id;
@@ -180,23 +227,78 @@ export const joinDraftKingsClassicSalaries = ({
     salary_slate.salaries.map((salaryEntry) => [String(salaryEntry.player_id), salaryEntry] as const)
   );
 
-  // Legacy name-based fallback (only used when no crosswalk is provided)
   const AMBIGUOUS_SENTINEL = null;
-  const salaryByNormalizedName = crosswalk
-    ? null
-    : (() => {
-        const map = new Map<string, typeof salary_slate.salaries[number] | null>();
-        for (const entry of salary_slate.salaries) {
-          const key = normalizeNameForJoin(entry.display_name);
-          if (!key) continue;
-          if (map.has(key)) {
-            map.set(key, AMBIGUOUS_SENTINEL);
-          } else {
-            map.set(key, entry);
-          }
-        }
-        return map;
-      })();
+  const salaryByNormalizedNameAndTeam = (() => {
+    const map = new Map<string, typeof salary_slate.salaries[number] | null>();
+
+    for (const entry of salary_slate.salaries) {
+      const key = buildNameTeamKey(entry.display_name, entry.team_abbreviation);
+      if (key === null) {
+        continue;
+      }
+
+      if (map.has(key)) {
+        map.set(key, AMBIGUOUS_SENTINEL);
+      } else {
+        map.set(key, entry);
+      }
+    }
+
+    return map;
+  })();
+
+  const toReadyPlayer = (
+    player: PlayerCard,
+    salary: typeof salary_slate.salaries[number]
+  ): DraftKingsClassicPlayerCard => ({
+    ...player,
+    fantasy_summary: {
+      ...player.fantasy_summary!,
+      salary: salary.salary,
+      value: deriveDraftKingsClassicValue(
+        player.fantasy_summary!.projected_points,
+        salary.salary
+      )
+    },
+    draftkings_classic: buildReadyJoinState(draftGroupId, salary.draftable_id)
+  });
+
+  const buildMissingSalaryPlayer = (
+    player: PlayerCard,
+    crosswalkMissReason: "unresolved" | "no_dk_link" | null
+  ): DraftKingsClassicPlayerCard => {
+    const fallbackSalary = matchSalaryByNameAndTeam(
+      player,
+      salaryJoinIdentities,
+      salaryByNormalizedNameAndTeam
+    );
+
+    if (fallbackSalary) {
+      return toReadyPlayer(player, fallbackSalary);
+    }
+
+    if (crosswalkMissReason === "unresolved") {
+      return toHeldPlayer(
+        player,
+        draftGroupId,
+        "Crosswalk: player identity unresolved — cannot match DraftKings salary"
+      );
+    }
+
+    if (crosswalkMissReason === "no_dk_link") {
+      return toHeldPlayer(
+        player,
+        draftGroupId,
+        "Crosswalk: player resolved but no dk_player_id link — cannot match DraftKings salary"
+      );
+    }
+
+    return toHeldPlayer(
+      player,
+      draftGroupId,
+      "DraftKings Classic salary missing for reconciled player row"
+    );
+  };
 
   const joinedPlayers = players.map<DraftKingsClassicPlayerCard>((player) => {
     if (player.blocked.is_blocked) {
@@ -228,50 +330,22 @@ export const joinDraftKingsClassicSalaries = ({
           team_abbreviation: player.team_id.toUpperCase()
         });
 
-        if (resolution.canonical_player_id === null) {
-          return toHeldPlayer(
-            player,
-            draftGroupId,
-            "Crosswalk: player identity unresolved — cannot match DraftKings salary"
-          );
-        }
-
-        return toHeldPlayer(
+        return buildMissingSalaryPlayer(
           player,
-          draftGroupId,
-          "Crosswalk: player resolved but no dk_player_id link — cannot match DraftKings salary"
+          resolution.canonical_player_id === null ? "unresolved" : "no_dk_link"
         );
       }
     } else {
       // Legacy path: mlb_stats_api_id / player_id primary match + name fallback
       const salaryJoinKey = player.mlb_stats_api_id ?? player.player_id;
-      matchedSalary = salaryByPlayerId.get(salaryJoinKey)
-        ?? salaryByNormalizedName?.get(normalizeNameForJoin(player.player_id));
+      matchedSalary = salaryByPlayerId.get(salaryJoinKey);
 
       if (!matchedSalary) {
-        return toHeldPlayer(
-          player,
-          draftGroupId,
-          "DraftKings Classic salary missing for reconciled player row"
-        );
+        return buildMissingSalaryPlayer(player, null);
       }
     }
 
-    return {
-      ...player,
-      fantasy_summary: {
-        ...player.fantasy_summary,
-        salary: matchedSalary.salary,
-        value: deriveDraftKingsClassicValue(
-          player.fantasy_summary.projected_points,
-          matchedSalary.salary
-        )
-      },
-      draftkings_classic: buildReadyJoinState(
-        draftGroupId,
-        matchedSalary.draftable_id
-      )
-    };
+    return toReadyPlayer(player, matchedSalary);
   });
 
   const heldPlayers = joinedPlayers.filter(
@@ -293,11 +367,16 @@ export const joinDraftKingsClassicSalaries = ({
 export const buildDraftKingsClassicPlayerCards = (
   preparedInputs: PreparedGameInputs,
   salarySlate: DraftKingsClassicSalarySlate,
-  options: BuildPlayerCardOptions = {}
+  options: BuildPlayerCardOptions & {
+    readonly salaryJoinIdentities?: DraftKingsClassicSalaryJoinIdentities;
+  } = {}
 ): DraftKingsClassicPlayerCardsResult =>
   joinDraftKingsClassicSalaries({
     game: buildGameCard(preparedInputs),
     players: buildPlayerCards(preparedInputs, options).players,
     salary_slate: salarySlate,
-    ...(options.crosswalk ? { crosswalk: options.crosswalk } : {})
+    ...(options.crosswalk ? { crosswalk: options.crosswalk } : {}),
+    ...(options.salaryJoinIdentities
+      ? { salaryJoinIdentities: options.salaryJoinIdentities }
+      : {})
   });
