@@ -1,0 +1,67 @@
+{
+  "version": 1,
+  "generated_at": "2026-04-10T00:00:00Z",
+  "entry_count": 4,
+  "entries": [
+    {
+      "canonical_player_id": "mlb-543037",
+      "mlb_stats_api_id": "543037",
+      "display_name": "Gerrit Cole",
+      "normalized_name": "gerritcole",
+      "team_abbreviation": "NYY",
+      "position": "P",
+      "throws": "R",
+      "seeded_at": "2026-04-10T00:00:00Z",
+      "dk_player_id": null,
+      "dk_player_dk_id": null,
+      "rotowire_slug": null,
+      "linked_at": null,
+      "linked_via": null
+    },
+    {
+      "canonical_player_id": "mlb-519242",
+      "mlb_stats_api_id": "519242",
+      "display_name": "Chris Sale",
+      "normalized_name": "chrissale",
+      "team_abbreviation": "BOS",
+      "position": "P",
+      "throws": "L",
+      "seeded_at": "2026-04-10T00:00:00Z",
+      "dk_player_id": null,
+      "dk_player_dk_id": null,
+      "rotowire_slug": null,
+      "linked_at": null,
+      "linked_via": null
+    },
+    {
+      "canonical_player_id": "mlb-592450",
+      "mlb_stats_api_id": "592450",
+      "display_name": "Aaron Judge",
+      "normalized_name": "aaronjudge",
+      "team_abbreviation": "NYY",
+      "position": "RF",
+      "throws": "R",
+      "seeded_at": "2026-04-10T00:00:00Z",
+      "dk_player_id": null,
+      "dk_player_dk_id": null,
+      "rotowire_slug": null,
+      "linked_at": null,
+      "linked_via": null
+    },
+    {
+      "canonical_player_id": "mlb-660271",
+      "mlb_stats_api_id": "660271",
+      "display_name": "Ronald Acuna Jr.",
+      "normalized_name": "ronaldacunajr",
+      "team_abbreviation": "ATL",
+      "position": "RF",
+      "throws": "R",
+      "seeded_at": "2026-04-10T00:00:00Z",
+      "dk_player_id": null,
+      "dk_player_dk_id": null,
+      "rotowire_slug": null,
+      "linked_at": null,
+      "linked_via": null
+    }
+  ]
+}

@@ -44,6 +44,7 @@ export interface PreparedPitcherInputs {
 
 export interface PreparedBatterInputs {
   readonly player_id: PlayerId;
+  readonly mlb_stats_api_id: string | null;
   readonly team_id: TeamId;
   readonly batting_order: number | null;
   readonly handedness: Handedness;

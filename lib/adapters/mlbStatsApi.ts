@@ -533,6 +533,7 @@ const buildPreparedBatters = (
 
     batters.push({
       player_id: playerId,
+      mlb_stats_api_id: String(playerId),
       team_id: teamId,
       batting_order: battingOrder,
       handedness: "unknown",

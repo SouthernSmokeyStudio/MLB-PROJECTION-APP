@@ -71,6 +71,7 @@ const makeCompleteBatter = (
   slot: number
 ): PreparedBatterInputs => ({
   player_id: asPlayerId(id),
+  mlb_stats_api_id: null,
   team_id: asTeamId(teamId),
   batting_order: slot,
   handedness: "R",
