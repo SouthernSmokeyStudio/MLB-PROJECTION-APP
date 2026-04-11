@@ -114,6 +114,7 @@ const makeProjectedGameData = (overrides?: {
   game_id: asGameId("mlb-2026-04-10-nyy-bos"),
   away_starter: overrides?.awayStarter !== undefined ? overrides.awayStarter : {
     player_id: asPlayerId("cole-projected"),
+    full_name: "Cole Projected",
     team_id: asTeamId("nyy"),
     handedness: "R",
     starting_status: "expected",
@@ -121,6 +122,7 @@ const makeProjectedGameData = (overrides?: {
   },
   home_starter: overrides?.homeStarter !== undefined ? overrides.homeStarter : {
     player_id: asPlayerId("sale-projected"),
+    full_name: "Sale Projected",
     team_id: asTeamId("bos"),
     handedness: "L",
     starting_status: "expected",
@@ -207,6 +209,7 @@ describe("normalizeToMergeInput — tier normalizers", () => {
   it("projectedStarterToCandidate tags tier as projected", () => {
     const starter: ProjectedStarter = {
       player_id: asPlayerId("cole-proj"),
+      full_name: "Cole Proj",
       team_id: asTeamId("nyy"),
       handedness: "R",
       starting_status: "expected",

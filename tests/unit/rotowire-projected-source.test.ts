@@ -366,6 +366,7 @@ describe("rotowire adapter — canonical shape normalization", () => {
     // Away starter
     expect(game1.away_starter).not.toBeNull();
     expect(game1.away_starter!.player_id).toBe("gerrit-cole");
+    expect(game1.away_starter!.full_name).toBe("gerrit cole");
     expect(game1.away_starter!.team_id).toBe("nyy");
     expect(game1.away_starter!.handedness).toBe("R");
     expect(game1.away_starter!.starting_status).toBe("confirmed");
@@ -374,6 +375,7 @@ describe("rotowire adapter — canonical shape normalization", () => {
     // Home starter
     expect(game1.home_starter).not.toBeNull();
     expect(game1.home_starter!.player_id).toBe("chris-sale");
+    expect(game1.home_starter!.full_name).toBe("chris sale");
     expect(game1.home_starter!.team_id).toBe("bos");
     expect(game1.home_starter!.handedness).toBe("L");
     expect(game1.home_starter!.starting_status).toBe("expected");
@@ -602,6 +604,7 @@ describe("rotowire adapter — no provider-specific leakage", () => {
     const keys = Object.keys(starter).sort();
     expect(keys).toEqual([
       "confidence",
+      "full_name",
       "handedness",
       "player_id",
       "starting_status",

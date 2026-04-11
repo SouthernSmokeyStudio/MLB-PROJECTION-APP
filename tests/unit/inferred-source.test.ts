@@ -242,6 +242,7 @@ describe("inference contract — downstream compatibility", () => {
 
     const asProjected: ProjectedStarter = {
       player_id: inferred.player_id,
+      full_name: null,
       team_id: inferred.team_id,
       handedness: inferred.handedness,
       starting_status: inferred.starting_status,

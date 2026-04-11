@@ -400,6 +400,7 @@ const normalizeRwStarter = (
   teamId: TeamId
 ): ProjectedStarter => ({
   player_id: asPlayerId(slugifyPlayerName(rwStarter.name)),
+  full_name: rwStarter.name,
   team_id: teamId,
   handedness: normalizeHandedness(rwStarter.hand),
   starting_status: normalizeStartingStatus(rwStarter.status),

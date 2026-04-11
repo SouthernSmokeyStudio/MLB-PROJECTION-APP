@@ -39,6 +39,7 @@ vi.mock("@lib/adapters/mlbStatsApi", async () => {
 });
 
 import { loadLiveSlate } from "../../lib/services/loadLiveSlate";
+import { buildPlayerBoard } from "../../lib/services/buildPlayerBoard";
 import {
   fetchAndParseMlbStatsApiSchedule,
   fetchMlbStatsApiBoxscore,
@@ -167,6 +168,7 @@ const projectedGame: ProjectedGameData = {
   game_id: "mlb-2026-03-27-nyy-bos" as never,
   away_starter: {
     player_id: "gerrit-cole" as never,
+    full_name: "Gerrit Cole",
     team_id: "nyy" as never,
     handedness: "R",
     starting_status: "probable",
@@ -174,6 +176,7 @@ const projectedGame: ProjectedGameData = {
   },
   home_starter: {
     player_id: "chris-sale" as never,
+    full_name: "Chris Sale",
     team_id: "bos" as never,
     handedness: "L",
     starting_status: "probable",
@@ -442,6 +445,17 @@ describe("loadLiveSlate - projected starter flow into preparation", () => {
     expect(prepared?.home_starter?.player_id).toBe("chris-sale");
     expect(prepared?.has_both_starters).toBe(true);
     expect(prepared?.blocked.blocked_reason).toBeNull();
+    expect(result.data.games[0]?.playerIdentities["gerrit-cole"]?.full_name).toBe("Gerrit Cole");
+    expect(result.data.games[0]?.playerIdentities["chris-sale"]?.full_name).toBe("Chris Sale");
+
+    const playerBoard = buildPlayerBoard(result.data.games, {
+      source: result.data.source,
+      date: result.data.date,
+      generated_at: result.data.generated_at,
+      counts: result.data.counts
+    });
+    expect(playerBoard.players.find((player) => player.player_id === "gerrit-cole")?.full_name)
+      .toBe("Gerrit Cole");
 
     const cards = buildPlayerCards(prepared!);
     expect(cards.players.length).toBeGreaterThan(0);
@@ -471,5 +485,29 @@ describe("loadLiveSlate - projected starter flow into preparation", () => {
 
     const cards = buildPlayerCards(prepared!);
     expect(cards.players).toHaveLength(0);
+  });
+
+  it("does not invent projected pitcher full names from slug-only identity", async () => {
+    mockOneGameScheduleAndBoxscore();
+
+    const result = await loadLiveSlate("2026-03-27", {
+      projectedGames: new Map([
+        [
+          projectedGame.game_id,
+          {
+            ...projectedGame,
+            away_starter: projectedGame.away_starter
+              ? { ...projectedGame.away_starter, full_name: null }
+              : null
+          }
+        ]
+      ])
+    });
+
+    expect(result.success).toBe(true);
+    if (!result.success) throw new Error(result.error);
+
+    expect(result.data.games[0]?.preparedGame.away_starter?.player_id).toBe("gerrit-cole");
+    expect(result.data.games[0]?.playerIdentities["gerrit-cole"]).toBeUndefined();
   });
 });

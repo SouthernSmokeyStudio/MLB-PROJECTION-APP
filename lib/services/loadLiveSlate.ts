@@ -450,9 +450,27 @@ const buildPlayerIdentitiesFromBoxscore = (
   });
 };
 
+const buildProjectedStarterIdentity = (
+  starter: ProjectedGameData["away_starter"]
+): LiveSlatePlayerIdentity | null => {
+  const fullName = starter?.full_name?.trim();
+
+  if (!starter || !fullName) {
+    return null;
+  }
+
+  return {
+    player_id: starter.player_id,
+    full_name: fullName,
+    position: "P",
+    batting_order: null
+  };
+};
+
 const buildPlayerIdentityMap = (
   sourceGame: NormalizedGameEntry,
-  boxscore: unknown | null
+  boxscore: unknown | null,
+  projectedGame: ProjectedGameData | null
 ): Readonly<Record<string, LiveSlatePlayerIdentity>> => {
   const identityMap: Record<string, LiveSlatePlayerIdentity> = {};
 
@@ -475,16 +493,27 @@ const buildPlayerIdentityMap = (
     identityMap[fallbackIdentity.player_id] = fallbackIdentity;
   }
 
-  if (boxscore === null) {
-    return identityMap;
+  if (boxscore !== null) {
+    const boxscoreIdentities = buildPlayerIdentitiesFromBoxscore(boxscore);
+
+    if (boxscoreIdentities.success) {
+      for (const identity of [...boxscoreIdentities.data.away, ...boxscoreIdentities.data.home]) {
+        identityMap[identity.player_id] = mergePlayerIdentity(
+          identityMap[identity.player_id],
+          identity
+        );
+      }
+    }
   }
 
-  const boxscoreIdentities = buildPlayerIdentitiesFromBoxscore(boxscore);
-  if (!boxscoreIdentities.success) {
-    return identityMap;
-  }
+  for (const identity of [
+    buildProjectedStarterIdentity(projectedGame?.away_starter ?? null),
+    buildProjectedStarterIdentity(projectedGame?.home_starter ?? null)
+  ]) {
+    if (!identity) {
+      continue;
+    }
 
-  for (const identity of [...boxscoreIdentities.data.away, ...boxscoreIdentities.data.home]) {
     identityMap[identity.player_id] = mergePlayerIdentity(
       identityMap[identity.player_id],
       identity
@@ -669,7 +698,8 @@ export const loadLiveSlate = async (
     ]);
     const boxscorePayload = fetchedBoxscore.success ? fetchedBoxscore.data : null;
     const linescorePayload = fetchedLinescore.success ? fetchedLinescore.data : null;
-    const playerIdentities = buildPlayerIdentityMap(game, boxscorePayload);
+    const projectedForGame = options?.projectedGames?.get(game.normalizedGame.game_id) ?? null;
+    const playerIdentities = buildPlayerIdentityMap(game, boxscorePayload, projectedForGame);
     const liveScoreState = buildLiveSlateScoreState({
       sourceGame: game,
       boxscore: boxscorePayload,
@@ -679,7 +709,6 @@ export const loadLiveSlate = async (
     // Resolve which starter identity wins per the three-tier merge law.
     // When no projected/inferred data is provided, mergedCanonical is the
     // original canonicalGame — zero behavioral change from the pre-merge path.
-    const projectedForGame = options?.projectedGames?.get(game.normalizedGame.game_id) ?? null;
     const inferredForGame = options?.inferredGames?.get(game.normalizedGame.game_id) ?? null;
     const merged = resolveGameSources(game.normalizedGame, projectedForGame, inferredForGame);
     const mergedCanonical = applyMergedStartersToCanonical(game.normalizedGame, merged);

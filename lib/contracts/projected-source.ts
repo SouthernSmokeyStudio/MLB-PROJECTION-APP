@@ -29,6 +29,7 @@ import type {
  */
 export interface ProjectedStarter {
   readonly player_id: PlayerId;
+  readonly full_name: string | null;
   readonly team_id: TeamId;
   readonly handedness: Handedness;
   readonly starting_status: StartingStatus;

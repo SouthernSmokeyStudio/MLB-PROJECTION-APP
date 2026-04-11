@@ -549,6 +549,7 @@ describe("/api/slate-snapshot route", () => {
             game_id: "mlb-2026-03-27-nyy-bos",
             away_starter: {
               player_id: "gerrit-cole",
+              full_name: "Gerrit Cole",
               team_id: "nyy",
               handedness: "R",
               starting_status: "probable",
@@ -556,6 +557,7 @@ describe("/api/slate-snapshot route", () => {
             },
             home_starter: {
               player_id: "chris-sale",
+              full_name: "Chris Sale",
               team_id: "bos",
               handedness: "L",
               starting_status: "probable",

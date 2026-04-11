@@ -31,6 +31,7 @@ import { createTestProjectedSourceAdapter } from "../../lib/adapters/testProject
 
 const makeStarter = (playerId: string, teamId: string): ProjectedStarter => ({
   player_id: asPlayerId(playerId),
+  full_name: playerId.replace(/-/g, " "),
   team_id: asTeamId(teamId),
   handedness: "R",
   starting_status: "expected",
@@ -106,6 +107,7 @@ describe("projected-source contract — provider-neutral shape", () => {
 
     // Canonical fields present
     expect(starter.player_id).toBe("gerrit-cole");
+    expect(starter.full_name).toBe("gerrit cole");
     expect(starter.team_id).toBe("nyy");
     expect(starter.handedness).toBe("R");
     expect(starter.starting_status).toBe("expected");
@@ -115,6 +117,7 @@ describe("projected-source contract — provider-neutral shape", () => {
     const keys = Object.keys(starter).sort();
     expect(keys).toEqual([
       "confidence",
+      "full_name",
       "handedness",
       "player_id",
       "starting_status",
@@ -212,7 +215,7 @@ describe("projected-source adapter — fail-closed", () => {
 describe("projected-source contract — downstream compatibility", () => {
   it("ProjectedStarter fields are a superset of ProbablePitcher minus mlb_stats_api_id", () => {
     // ProbablePitcher has: player_id, mlb_stats_api_id, starting_status, handedness
-    // ProjectedStarter has: player_id, team_id, handedness, starting_status, confidence
+    // ProjectedStarter has: player_id, full_name, team_id, handedness, starting_status, confidence
     // The overlap (player_id, handedness, starting_status) is sufficient for
     // canonical conversion.  mlb_stats_api_id is provider-specific and correctly
     // absent from the projected contract.

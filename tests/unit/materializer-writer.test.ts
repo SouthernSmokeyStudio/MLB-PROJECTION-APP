@@ -173,6 +173,7 @@ const makeProjectedResult = (overrides?: Partial<ProjectedGameData>): ProjectedS
     game_id: GAME_ID,
     away_starter: {
       player_id: asPlayerId("cole-projected"),
+      full_name: "Cole Projected",
       team_id: asTeamId("nyy"),
       handedness: "R",
       starting_status: "expected",
@@ -180,6 +181,7 @@ const makeProjectedResult = (overrides?: Partial<ProjectedGameData>): ProjectedS
     },
     home_starter: {
       player_id: asPlayerId("sale-projected"),
+      full_name: "Sale Projected",
       team_id: asTeamId("bos"),
       handedness: "L",
       starting_status: "expected",
