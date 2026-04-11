@@ -4,11 +4,13 @@ import preparedFixture from "../../data/fixtures/sample-prepared-game.json";
 import type { DraftKingsClassicSalarySlate } from "../../lib/contracts/draftkings-classic";
 import type { DraftKingsSportsbookMlbMoneylineSlate } from "../../lib/contracts/draftkings-sportsbook-mlb-moneyline";
 import type { PreparedGameInputs } from "../../lib/contracts/prepared";
+import type { PlayerCrosswalkEntry } from "../../lib/contracts/player-crosswalk";
 import { asISOTimestamp } from "../../lib/contracts/types";
 import { parseMlbStatsApiGamePayload } from "../../lib/adapters/mlbStatsApi";
 import { normalizeMlbStatsApiGame } from "../../lib/normalization/mlbStatsApiNormalizer";
 import { parseSlateSnapshotPayload, getSlateSnapshotBlockedSections } from "../../lib/slate-snapshot";
 import { buildSlateSnapshot } from "../../lib/services/buildSlateSnapshot";
+import { indexCrosswalk } from "../../lib/crosswalk/resolvePlayerIdentity";
 
 const prepared = preparedFixture as unknown as PreparedGameInputs;
 
@@ -147,6 +149,60 @@ const makeMoneylineSlate = (): DraftKingsSportsbookMlbMoneylineSlate => ({
   ]
 });
 
+/**
+ * Build a test crosswalk with linked dk_player_ids that match the salary slate.
+ *
+ * Salary slate uses player_id "543037" (Cole) and "nyy-1" (Judge).
+ * Crosswalk entries have dk_player_id values matching those salary keys.
+ */
+const makeLinkedTestCrosswalk = () => {
+  const makeEntry = (
+    overrides: Partial<PlayerCrosswalkEntry> & Pick<PlayerCrosswalkEntry, "canonical_player_id" | "mlb_stats_api_id" | "display_name" | "team_abbreviation">
+  ): PlayerCrosswalkEntry => ({
+    normalized_name: overrides.display_name
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/[^a-zA-Z]/g, "")
+      .toLowerCase(),
+    position: "P",
+    throws: "R",
+    seeded_at: "2026-04-10T00:00:00Z",
+    dk_player_id: null,
+    dk_player_dk_id: null,
+    rotowire_slug: null,
+    linked_at: null,
+    linked_via: null,
+    ...overrides
+  });
+
+  return indexCrosswalk({
+    version: 1,
+    generated_at: "2026-04-10T00:00:00Z",
+    entry_count: 2,
+    entries: [
+      makeEntry({
+        canonical_player_id: "mlb-543037",
+        mlb_stats_api_id: "543037",
+        display_name: "Gerrit Cole",
+        team_abbreviation: "NYY",
+        dk_player_id: "543037",
+        linked_at: "2026-04-10T00:00:00Z",
+        linked_via: "manual"
+      }),
+      makeEntry({
+        canonical_player_id: "mlb-592450",
+        mlb_stats_api_id: "592450",
+        display_name: "Aaron Judge",
+        team_abbreviation: "NYY",
+        position: "RF",
+        dk_player_id: "nyy-1",
+        linked_at: "2026-04-10T00:00:00Z",
+        linked_via: "manual"
+      })
+    ]
+  });
+};
+
 describe("slate snapshot scaffolding", () => {
   it("wraps schedule and player boards while publishing a partial smoke signal", () => {
     const snapshot = buildSlateSnapshot([sourceGame], {
@@ -193,6 +249,7 @@ describe("slate snapshot scaffolding", () => {
       dfs_edge: {
         source: "mlb-statsapi-live+draftkings-classic",
         note: null,
+        crosswalk: makeLinkedTestCrosswalk(),
         draftkings_classic: {
           draft_group_id: "145020",
           label: "Featured DraftKings Classic",
@@ -250,6 +307,7 @@ describe("slate snapshot scaffolding", () => {
       dfs_edge: {
         source: "mlb-statsapi-live+draftkings-classic",
         note: null,
+        crosswalk: makeLinkedTestCrosswalk(),
         draftkings_classic: {
           draft_group_id: "145020",
           label: "Featured DraftKings Classic",
@@ -284,5 +342,139 @@ describe("slate snapshot scaffolding", () => {
       parsedSnapshot.dfs_edge.payload?.ready_pitchers[0]?.draftkings_classic.ownership_source
     ).toBe("placeholder");
     expect(parsedSnapshot.live_scoreboard.payload?.mode).toBe("live-scoreboard-v1");
+  });
+
+  it("linked crosswalk-resolved player reaches salary through the active caller path", () => {
+    const crosswalk = makeLinkedTestCrosswalk();
+
+    const snapshot = buildSlateSnapshot([sourceGame], {
+      source: "mlb-statsapi-live",
+      date: "2026-03-27",
+      generated_at: "2026-03-27T15:30:00Z",
+      counts,
+      simulation: { seed: 7, iterations: 100 },
+      dfs_edge: {
+        source: "mlb-statsapi-live+draftkings-classic",
+        note: null,
+        crosswalk,
+        draftkings_classic: {
+          draft_group_id: "145020",
+          label: "Featured DraftKings Classic",
+          min_start_time: "2026-03-27T19:05:00Z",
+          max_start_time: "2026-03-27T19:05:00Z",
+          tags: ["Featured"]
+        },
+        salary_slate: makeSalarySlate()
+      }
+    });
+
+    // Cole resolves via mlb_stats_api_id → dk_player_id "543037" → salary 10200
+    const readyPitcher = snapshot.dfs_edge.payload?.ready_pitchers[0];
+    expect(readyPitcher).toBeDefined();
+    expect(readyPitcher?.draftkings_classic.blocked.is_blocked).toBe(false);
+    expect(readyPitcher?.draftkings_classic.salary).toBe(10200);
+
+    // Judge (nyy-1) resolves via dk_player_id → salary 5600
+    const readyBatter = snapshot.dfs_edge.payload?.ready_batters.find(
+      (b) => b.draftkings_classic.salary === 5600
+    );
+    expect(readyBatter).toBeDefined();
+    expect(readyBatter?.draftkings_classic.blocked.is_blocked).toBe(false);
+
+    // Unresolved players are held
+    expect(snapshot.dfs_edge.payload?.held_players.length).toBeGreaterThan(0);
+    expect(
+      snapshot.dfs_edge.payload?.held_players.every(
+        (p) => p.draftkings_classic.blocked.is_blocked
+      )
+    ).toBe(true);
+  });
+
+  it("auto-load skips crosswalk when committed file has no linked dk_player_ids", () => {
+    // No crosswalk supplied — auto-loads from data/crosswalk/player-crosswalk.json.
+    // Committed crosswalk has dk_player_id: null for ALL entries, so the linked-entry
+    // guard skips it. The legacy salary join path runs and matches normally.
+    const snapshot = buildSlateSnapshot([sourceGame], {
+      source: "mlb-statsapi-live",
+      date: "2026-03-27",
+      generated_at: "2026-03-27T15:30:00Z",
+      counts,
+      simulation: { seed: 7, iterations: 100 },
+      dfs_edge: {
+        source: "mlb-statsapi-live+draftkings-classic",
+        note: null,
+        draftkings_classic: {
+          draft_group_id: "145020",
+          label: "Featured DraftKings Classic",
+          min_start_time: "2026-03-27T19:05:00Z",
+          max_start_time: "2026-03-27T19:05:00Z",
+          tags: ["Featured"]
+        },
+        salary_slate: makeSalarySlate()
+      }
+    });
+
+    // Legacy join path runs — ready players matched via mlb_stats_api_id / player_id
+    expect(snapshot.dfs_edge.payload?.summary.ready_players).toBeGreaterThan(0);
+    expect(snapshot.dfs_edge.status.state).toBe("partial");
+  });
+
+  it("explicitly-supplied unlinked crosswalk holds resolved players", () => {
+    // Crosswalk supplied directly with dk_player_id: null for all entries.
+    // Unlike auto-load, explicit supply always activates the crosswalk path.
+    const unlinkedCrosswalk = indexCrosswalk({
+      version: 1,
+      generated_at: "2026-04-10T00:00:00Z",
+      entry_count: 1,
+      entries: [{
+        canonical_player_id: "mlb-543037",
+        mlb_stats_api_id: "543037",
+        display_name: "Gerrit Cole",
+        normalized_name: "gerritcole",
+        team_abbreviation: "NYY",
+        position: "P",
+        throws: "R",
+        seeded_at: "2026-04-10T00:00:00Z",
+        dk_player_id: null,
+        dk_player_dk_id: null,
+        rotowire_slug: null,
+        linked_at: null,
+        linked_via: null
+      }]
+    });
+
+    const snapshot = buildSlateSnapshot([sourceGame], {
+      source: "mlb-statsapi-live",
+      date: "2026-03-27",
+      generated_at: "2026-03-27T15:30:00Z",
+      counts,
+      simulation: { seed: 7, iterations: 100 },
+      dfs_edge: {
+        source: "mlb-statsapi-live+draftkings-classic",
+        note: null,
+        crosswalk: unlinkedCrosswalk,
+        draftkings_classic: {
+          draft_group_id: "145020",
+          label: "Featured DraftKings Classic",
+          min_start_time: "2026-03-27T19:05:00Z",
+          max_start_time: "2026-03-27T19:05:00Z",
+          tags: ["Featured"]
+        },
+        salary_slate: makeSalarySlate()
+      }
+    });
+
+    // Crosswalk active: all players resolved-but-unlinked or unresolved → held
+    expect(snapshot.dfs_edge.payload?.summary.ready_pitchers).toBe(0);
+    expect(snapshot.dfs_edge.payload?.summary.ready_batters).toBe(0);
+    expect(snapshot.dfs_edge.payload?.summary.held_players).toBeGreaterThan(0);
+    expect(snapshot.dfs_edge.status.state).toBe("partial");
+
+    // Verify held reason includes the crosswalk-specific message
+    const heldPitcher = snapshot.dfs_edge.payload?.held_players.find(
+      (p) => p.projection.deterministic_summary?.kind === "pitcher"
+    );
+    expect(heldPitcher?.draftkings_classic.blocked.is_blocked).toBe(true);
+    expect(heldPitcher?.draftkings_classic.blocked.blocked_reason).toContain("Crosswalk");
   });
 });

@@ -18,6 +18,8 @@ import { buildSmokeSignal } from "./buildSmokeSignal";
 import { buildPlayerBoard } from "./buildPlayerBoard";
 import { buildScheduleBoard } from "./buildScheduleBoard";
 import type { LiveSlateCounts, LiveSlateSourceGame } from "./loadLiveSlate";
+import { loadCrosswalk } from "@lib/crosswalk/loadCrosswalk";
+import { indexCrosswalk } from "@lib/crosswalk/resolvePlayerIdentity";
 
 export interface BuildSlateSnapshotOptions {
   readonly source: string;
@@ -172,6 +174,16 @@ export const buildSlateSnapshot = (
 ): SlateSnapshotPayload => {
   const generatedAt = asISOTimestamp(options.generated_at ?? new Date().toISOString());
   const simulationOptions = options.simulation;
+
+  // Load + index crosswalk from committed file. Fail closed: null on any load/validate failure.
+  // The crosswalk is only activated when at least one entry has a linked dk_player_id,
+  // otherwise the salary join would hold every resolved player with no benefit.
+  const loadedCrosswalk = (() => {
+    const raw = loadCrosswalk();
+    if (!raw) return null;
+    const hasLinkedEntry = raw.entries.some((entry) => entry.dk_player_id !== null);
+    return hasLinkedEntry ? indexCrosswalk(raw) : null;
+  })();
   const schedulePayload = buildScheduleBoard(sourceGames, {
     source: options.schedule?.source ?? options.source,
     date: options.date,
@@ -215,12 +227,16 @@ export const buildSlateSnapshot = (
 
   const dfsEdge = options.dfs_edge
     ? (() => {
+        // Caller-supplied crosswalk wins; otherwise use auto-loaded from disk.
+        const effectiveCrosswalk = options.dfs_edge.crosswalk ?? loadedCrosswalk;
+
         const payload = buildDfsEdgeBoard(sourceGames, {
           ...options.dfs_edge,
           date: options.date,
           generated_at: generatedAt,
           counts: options.counts,
-          ...(simulationOptions ? { simulation: simulationOptions } : {})
+          ...(simulationOptions ? { simulation: simulationOptions } : {}),
+          ...(effectiveCrosswalk ? { crosswalk: effectiveCrosswalk } : {})
         });
 
         return wrapSection(payload, buildDfsStatus(payload));
