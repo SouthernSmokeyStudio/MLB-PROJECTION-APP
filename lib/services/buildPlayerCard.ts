@@ -8,9 +8,12 @@ import {
 } from "@lib/projections/assembleGameProjection";
 import { projectFantasyPoints } from "@lib/scoring/projectFantasyPoints";
 import { simulateFantasy } from "@lib/simulation/simulateFantasy";
+import type { IndexedCrosswalk } from "@lib/crosswalk/resolvePlayerIdentity";
+import { resolvePlayerIdentity } from "@lib/crosswalk/resolvePlayerIdentity";
 
 export interface PlayerCard {
   readonly player_id: string;
+  readonly canonical_player_id: string | null;
   readonly mlb_stats_api_id: string | null;
   readonly team_id: string;
   readonly game_id: string;
@@ -69,6 +72,8 @@ export interface BuildPlayerCardOptions {
     readonly seed?: number;
     readonly iterations?: number;
   };
+  /** Pre-indexed crosswalk for canonical_player_id resolution. When absent, all cards get null. */
+  readonly crosswalk?: IndexedCrosswalk;
 }
 
 type GenericRecord = Record<string, unknown>;
@@ -136,6 +141,7 @@ const setDeterministicCandidate = (
 
   map.set(playerId, {
     player_id: playerId,
+    canonical_player_id: existing?.canonical_player_id ?? null,
     mlb_stats_api_id: existing?.mlb_stats_api_id ?? null,
     team_id: candidate.team_id as string,
     game_id: candidate.game_id as string,
@@ -238,6 +244,7 @@ export const buildPlayerCards = (
 
     deterministicPlayers.set(player.player_id, {
       player_id: player.player_id,
+      canonical_player_id: existing?.canonical_player_id ?? null,
       mlb_stats_api_id: existing?.mlb_stats_api_id ?? null,
       team_id: player.team_id,
       game_id: player.game_id,
@@ -264,6 +271,7 @@ export const buildPlayerCards = (
 
     deterministicPlayers.set(player.player_id, {
       player_id: player.player_id,
+      canonical_player_id: existing?.canonical_player_id ?? null,
       mlb_stats_api_id: existing?.mlb_stats_api_id ?? null,
       team_id: player.team_id,
       game_id: player.game_id,
@@ -320,6 +328,29 @@ export const buildPlayerCards = (
       }
     });
   });
+
+  // Resolve canonical_player_id when crosswalk is provided
+  if (options.crosswalk) {
+    const teamAbbreviationMap = new Map<string, string>([
+      [preparedInputs.away_team.team_id, preparedInputs.away_team.team_id.toUpperCase()],
+      [preparedInputs.home_team.team_id, preparedInputs.home_team.team_id.toUpperCase()]
+    ]);
+
+    for (const [playerId, card] of deterministicPlayers) {
+      const resolution = resolvePlayerIdentity(options.crosswalk, {
+        mlb_stats_api_id: card.mlb_stats_api_id,
+        player_id: playerId,
+        team_abbreviation: teamAbbreviationMap.get(card.team_id) ?? card.team_id.toUpperCase()
+      });
+
+      if (resolution.canonical_player_id !== null) {
+        deterministicPlayers.set(playerId, {
+          ...card,
+          canonical_player_id: resolution.canonical_player_id
+        });
+      }
+    }
+  }
 
   return {
     blocked,
