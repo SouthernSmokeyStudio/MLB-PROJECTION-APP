@@ -1014,6 +1014,165 @@ describe("DraftKings Classic salary join", () => {
       expect(readyPlayer!.draftkings_classic.blocked.is_blocked).toBe(false);
       expect(readyPlayer!.fantasy_summary?.salary).toBe(5800);
     });
+
+    it("duplicate DK entries for same player_id are not ambiguous — same player stays matchable", () => {
+      // Mirrors the real DK behavior: same player listed twice (multi-slot eligibility)
+      // with identical player_id and salary but different draftable_ids.
+      // Proved live: Jose Fernandez ARI appears as draftable_id 42603261 and 42603262,
+      // both player_id 1299987, salary 2900.
+      const realPlayers = buildPlayerCards(prepared).players;
+      const realPitcher = realPlayers.find((p) => p.deterministic_summary?.kind === "pitcher");
+      if (!realPitcher) throw new Error("Need a pitcher");
+
+      const pitcher: PlayerCard = {
+        ...realPitcher,
+        player_id: "jose-fernandez",
+        mlb_stats_api_id: null   // no primary ID match — forces name+team fallback
+      };
+
+      // Two entries: same display_name, same team, SAME player_id, different draftable_ids.
+      const duplicateSalarySlate: DraftKingsClassicSalarySlate = {
+        provider: "draftkings",
+        contest_type: "classic",
+        draft_group_id: "145382",
+        source: {
+          provider: "draftkings",
+          endpoint: "https://api.draftkings.com/draftgroups/v1/draftgroups/145382/draftables?format=json",
+          fetched_at: asISOTimestamp("2026-04-11T00:00:00Z"),
+          raw_payload_hash: null
+        },
+        salaries: [
+          {
+            draftable_id: "42603261",
+            player_id: asPlayerId("1299987"),
+            player_dk_id: "999001",
+            display_name: "Jose Fernandez",
+            short_name: "J. Fernandez",
+            position: "1B",
+            roster_slot_id: 200,
+            salary: 2900,
+            team_abbreviation: pitcher.team_id.toUpperCase(),
+            competition_id: "6200000",
+            competition_name: "ARI @ PHI",
+            competition_start: asISOTimestamp("2026-04-11T17:05:00Z")
+          },
+          {
+            draftable_id: "42603262",
+            player_id: asPlayerId("1299987"),   // same player_id
+            player_dk_id: "999001",
+            display_name: "Jose Fernandez",
+            short_name: "J. Fernandez",
+            position: "1B",
+            roster_slot_id: 200,
+            salary: 2900,
+            team_abbreviation: pitcher.team_id.toUpperCase(),
+            competition_id: "6200000",
+            competition_name: "ARI @ PHI",
+            competition_start: asISOTimestamp("2026-04-11T17:05:00Z")
+          }
+        ]
+      };
+
+      const result = joinDraftKingsClassicSalaries({
+        game: {
+          ...buildGameCard(prepared),
+          away_team_id: pitcher.team_id,
+          home_team_id: pitcher.team_id
+        },
+        players: [pitcher],
+        salary_slate: duplicateSalarySlate,
+        salaryJoinIdentities: {
+          [pitcher.player_id]: {
+            full_name: "Jose Fernandez",
+            team_abbreviation: pitcher.team_id.toUpperCase()
+          }
+        }
+      });
+
+      // Same player_id = not ambiguous → name+team fallback resolves → READY
+      expect(result.ready_players).toBe(1);
+      expect(result.held_players).toBe(0);
+      expect(result.players[0]!.fantasy_summary?.salary).toBe(2900);
+      expect(result.players[0]!.draftkings_classic.blocked.is_blocked).toBe(false);
+    });
+
+    it("duplicate key with different player_ids remains ambiguous and held", () => {
+      // Two genuinely different players with the same normalized name+team key
+      // must remain ambiguous (fail-closed).
+      const realPlayers = buildPlayerCards(prepared).players;
+      const realPitcher = realPlayers.find((p) => p.deterministic_summary?.kind === "pitcher");
+      if (!realPitcher) throw new Error("Need a pitcher");
+
+      const pitcher: PlayerCard = {
+        ...realPitcher,
+        player_id: "will-smith",
+        mlb_stats_api_id: null
+      };
+
+      // Two entries: same display_name, same team, DIFFERENT player_ids.
+      const ambiguousSlate: DraftKingsClassicSalarySlate = {
+        provider: "draftkings",
+        contest_type: "classic",
+        draft_group_id: "145382",
+        source: {
+          provider: "draftkings",
+          endpoint: "https://api.draftkings.com/draftgroups/v1/draftgroups/145382/draftables?format=json",
+          fetched_at: asISOTimestamp("2026-04-11T00:00:00Z"),
+          raw_payload_hash: null
+        },
+        salaries: [
+          {
+            draftable_id: "42100001",
+            player_id: asPlayerId("1000001"),
+            player_dk_id: "888001",
+            display_name: "Will Smith",
+            short_name: "W. Smith",
+            position: "C",
+            roster_slot_id: 200,
+            salary: 4000,
+            team_abbreviation: pitcher.team_id.toUpperCase(),
+            competition_id: "6200000",
+            competition_name: "LAD @ COL",
+            competition_start: asISOTimestamp("2026-04-11T20:10:00Z")
+          },
+          {
+            draftable_id: "42100002",
+            player_id: asPlayerId("1000002"),  // genuinely different player
+            player_dk_id: "888002",
+            display_name: "Will Smith",
+            short_name: "W. Smith",
+            position: "RP",
+            roster_slot_id: 110,
+            salary: 5000,
+            team_abbreviation: pitcher.team_id.toUpperCase(),
+            competition_id: "6200000",
+            competition_name: "LAD @ COL",
+            competition_start: asISOTimestamp("2026-04-11T20:10:00Z")
+          }
+        ]
+      };
+
+      const result = joinDraftKingsClassicSalaries({
+        game: {
+          ...buildGameCard(prepared),
+          away_team_id: pitcher.team_id,
+          home_team_id: pitcher.team_id
+        },
+        players: [pitcher],
+        salary_slate: ambiguousSlate,
+        salaryJoinIdentities: {
+          [pitcher.player_id]: {
+            full_name: "Will Smith",
+            team_abbreviation: pitcher.team_id.toUpperCase()
+          }
+        }
+      });
+
+      // Different player_ids = true ambiguity → fail-closed → HELD
+      expect(result.ready_players).toBe(0);
+      expect(result.held_players).toBe(1);
+      expect(result.players[0]!.draftkings_classic.blocked.is_blocked).toBe(true);
+    });
   });
 
   // ---------------------------------------------------------------------------

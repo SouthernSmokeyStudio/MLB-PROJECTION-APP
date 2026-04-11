@@ -238,7 +238,12 @@ export const joinDraftKingsClassicSalaries = ({
       }
 
       if (map.has(key)) {
-        map.set(key, AMBIGUOUS_SENTINEL);
+        const existing = map.get(key);
+        // Same player_id = same player listed twice (e.g. multi-slot DK draftables).
+        // Keep the existing entry. Only sentinel when player_id differs (true ambiguity).
+        if (existing !== AMBIGUOUS_SENTINEL && existing?.player_id !== entry.player_id) {
+          map.set(key, AMBIGUOUS_SENTINEL);
+        }
       } else {
         map.set(key, entry);
       }
