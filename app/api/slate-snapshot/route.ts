@@ -8,6 +8,7 @@ import {
   loadLiveSlate,
   loadMaterializedSlate
 } from "@lib/services";
+import { buildMaterializerConfig } from "@lib/materializer";
 
 const DEFAULT_SIMULATION = {
   seed: 20260328,
@@ -18,6 +19,27 @@ const SNAPSHOT_SOURCE = "mlb-statsapi-live";
 const DFS_EDGE_SOURCE = "mlb-statsapi-live+draftkings-classic";
 const BETTING_EDGE_SOURCE = "mlb-statsapi-live+draftkings-sportsbook-moneyline";
 const BETTING_EDGE_LABEL = "DraftKings Sportsbook MLB Pregame Moneyline";
+
+const loadProjectedGames = async (date: string) => {
+  const config = buildMaterializerConfig(
+    {
+      ROTOWIRE_ENDPOINT_URL: process.env.ROTOWIRE_ENDPOINT_URL,
+      ROTOWIRE_TIMEOUT_MS: process.env.ROTOWIRE_TIMEOUT_MS
+    },
+    { officialOnly: false }
+  );
+
+  if (!config.success || !config.data.projectedAdapter) {
+    return undefined;
+  }
+
+  const projected = await config.data.projectedAdapter.fetchProjectedData(date);
+  if (!projected.success) {
+    return undefined;
+  }
+
+  return new Map(projected.data.games.map((game) => [game.game_id, game]));
+};
 
 export async function GET(request: NextRequest): Promise<Response> {
   const date = request.nextUrl.searchParams.get("date") ?? getUtcDateString();
@@ -32,9 +54,13 @@ export async function GET(request: NextRequest): Promise<Response> {
     materializedResult.success && !materializedResult.data.metadata.is_stale
       ? materializedResult.data.slate
       : undefined;
+  const projectedGames = await loadProjectedGames(date);
 
   const [loadedLiveSlate, loadedDraftKingsSlate, loadedMoneylineSlate] = await Promise.all([
-    loadLiveSlate(date, { materializedBaseline }),
+    loadLiveSlate(date, {
+      materializedBaseline,
+      ...(projectedGames ? { projectedGames } : {})
+    }),
     loadDraftKingsClassicSlate(
       draftGroupId
         ? {

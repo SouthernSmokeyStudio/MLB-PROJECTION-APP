@@ -110,6 +110,48 @@ const parsePlayerPosition = (value: unknown): PlayerPosition => {
   }
 };
 
+const slugifyPlayerName = (value: string): string =>
+  value
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+
+const findBoxscorePlayerNumericId = (
+  boxscore: unknown,
+  side: "away" | "home",
+  playerId: PlayerId | null
+): number | null => {
+  if (playerId === null) {
+    return null;
+  }
+
+  const boxscoreRecord = readNullableRecord(boxscore);
+  const teamBlock = readNullableRecord(readNullableRecord(boxscoreRecord?.teams)?.[side]);
+  const players = readNullableRecord(teamBlock?.players);
+
+  if (!players) {
+    return null;
+  }
+
+  for (const player of Object.values(players)) {
+    const playerRecord = readNullableRecord(player);
+    const person = readNullableRecord(playerRecord?.person);
+    const numericId = parseIntegerLike(person?.id);
+    const fullName = readNullableString(person?.fullName);
+
+    if (
+      numericId !== null &&
+      (String(numericId) === playerId ||
+        (fullName !== null && slugifyPlayerName(fullName) === playerId))
+    ) {
+      return numericId;
+    }
+  }
+
+  return null;
+};
+
 const hasStatsArray = (payload: Record<string, unknown>): boolean =>
   Array.isArray(payload.stats);
 
@@ -662,11 +704,21 @@ export const loadLiveSlate = async (
         const homeTeamId = readNullableNumber(game.parsedGame.teams.home.team.id);
         const awayProbableNumericId =
           extracted.data.away_starter === null
-            ? readNullableNumber(game.parsedGame.teams.away.probablePitcher?.id)
+            ? readNullableNumber(game.parsedGame.teams.away.probablePitcher?.id) ??
+              findBoxscorePlayerNumericId(
+                fetchedBoxscore.data,
+                "away",
+                mergedCanonical.away.probable_pitcher?.player_id ?? null
+              )
             : null;
         const homeProbableNumericId =
           extracted.data.home_starter === null
-            ? readNullableNumber(game.parsedGame.teams.home.probablePitcher?.id)
+            ? readNullableNumber(game.parsedGame.teams.home.probablePitcher?.id) ??
+              findBoxscorePlayerNumericId(
+                fetchedBoxscore.data,
+                "home",
+                mergedCanonical.home.probable_pitcher?.player_id ?? null
+              )
             : null;
 
         const [

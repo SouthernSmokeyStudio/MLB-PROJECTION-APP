@@ -29,12 +29,24 @@ vi.mock("@lib/services", async () => {
   };
 });
 
+vi.mock("@lib/materializer", async () => {
+  const actual = await vi.importActual<typeof import("@lib/materializer")>("@lib/materializer");
+  return {
+    ...actual,
+    buildMaterializerConfig: vi.fn().mockReturnValue({
+      success: false,
+      error: "projected source not configured"
+    })
+  };
+});
+
 import { GET } from "@/app/api/slate-snapshot/route";
 import {
   loadDraftKingsClassicSlate,
   loadDraftKingsSportsbookMlbMoneylineSlate,
   loadLiveSlate
 } from "@lib/services";
+import { buildMaterializerConfig } from "@lib/materializer";
 
 const prepared = preparedFixture as unknown as PreparedGameInputs;
 const playerCards = buildPlayerCards(prepared).players;
@@ -141,6 +153,10 @@ const makeMoneylineSlate = (): DraftKingsSportsbookMlbMoneylineSlate => ({
 describe("/api/slate-snapshot route", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(buildMaterializerConfig).mockReturnValue({
+      success: false,
+      error: "projected source not configured"
+    });
   });
 
   it("returns a wrapped slate-snapshot-v1 payload", async () => {
@@ -515,5 +531,99 @@ describe("/api/slate-snapshot route", () => {
     expect(validated.version).toBe(1);
     expect(validated.schedule.status.state).toBe("ready");
     expect(validated.schedule.payload?.games).toHaveLength(1);
+  });
+
+  it("passes configured projected starter data into loadLiveSlate", async () => {
+    const fetchProjectedData = vi.fn().mockResolvedValue({
+      success: true,
+      data: {
+        provider_meta: {
+          provider: "test",
+          fetched_at: asISOTimestamp("2026-03-27T15:29:00Z"),
+          source_url: null
+        },
+        date: "2026-03-27",
+        generated_at: asISOTimestamp("2026-03-27T15:29:00Z"),
+        games: [
+          {
+            game_id: "mlb-2026-03-27-nyy-bos",
+            away_starter: {
+              player_id: "gerrit-cole",
+              team_id: "nyy",
+              handedness: "R",
+              starting_status: "probable",
+              confidence: "medium"
+            },
+            home_starter: {
+              player_id: "chris-sale",
+              team_id: "bos",
+              handedness: "L",
+              starting_status: "probable",
+              confidence: "medium"
+            },
+            away_lineup: null,
+            home_lineup: null
+          }
+        ]
+      }
+    });
+
+    vi.mocked(buildMaterializerConfig).mockReturnValue({
+      success: true,
+      data: {
+        projectedAdapter: {
+          source: "test-projected",
+          fetchProjectedData
+        },
+        inferenceEngine: null,
+        officialOnly: false
+      }
+    });
+    vi.mocked(loadLiveSlate).mockResolvedValue({
+      success: true,
+      data: {
+        source: "mlb-statsapi-live",
+        date: "2026-03-27",
+        generated_at: "2026-03-27T15:30:00Z",
+        counts: {
+          fetched_raw: 0,
+          parsed: 0,
+          normalized: 0,
+          prepared: 0,
+          boxscore_enriched: 0
+        },
+        note: null,
+        games: []
+      }
+    });
+    vi.mocked(loadDraftKingsClassicSlate).mockResolvedValue({
+      success: true,
+      data: {
+        source: "draftkings-classic-live",
+        date: "2026-03-27",
+        generated_at: "2026-03-27T15:35:00Z",
+        draft_group: null,
+        label: null,
+        salary_slate: null,
+        note: "No DraftKings Classic salary slate matched the requested date."
+      }
+    });
+    vi.mocked(loadDraftKingsSportsbookMlbMoneylineSlate).mockResolvedValue({
+      success: true,
+      data: {
+        source: "draftkings-sportsbook-mlb-moneyline-live",
+        date: "2026-03-27",
+        generated_at: "2026-03-27T15:35:00Z",
+        moneyline_slate: null,
+        note: "No DraftKings Sportsbook MLB pregame moneyline rows matched the requested date."
+      }
+    });
+
+    await GET(new NextRequest("http://localhost/api/slate-snapshot?date=2026-03-27"));
+
+    expect(fetchProjectedData).toHaveBeenCalledWith("2026-03-27");
+    const liveSlateOptions = vi.mocked(loadLiveSlate).mock.calls[0]?.[1];
+    expect(liveSlateOptions?.projectedGames).toBeInstanceOf(Map);
+    expect(liveSlateOptions?.projectedGames?.get("mlb-2026-03-27-nyy-bos" as never)?.away_starter?.player_id).toBe("gerrit-cole");
   });
 });

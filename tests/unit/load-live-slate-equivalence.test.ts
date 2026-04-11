@@ -13,8 +13,16 @@
  */
 
 import { describe, expect, it, vi } from "vitest";
+import rawFixture from "../../data/fixtures/sample-raw-game.json";
+import { parseMlbStatsApiGamePayload } from "../../lib/adapters/mlbStatsApi";
+import { buildPlayerCards } from "../../lib/services/buildPlayerCard";
+import type { ProjectedGameData } from "../../lib/contracts/projected-source";
 import { asISOTimestamp } from "../../lib/contracts/types";
 import type { MaterializedSlate } from "../../lib/contracts/materialized-slate";
+
+vi.mock("@lib/adapters/fetchWithTimeout", () => ({
+  fetchWithTimeout: vi.fn()
+}));
 
 // Mock the entire adapter layer so loadLiveSlate can run without network.
 vi.mock("@lib/adapters/mlbStatsApi", async () => {
@@ -23,12 +31,157 @@ vi.mock("@lib/adapters/mlbStatsApi", async () => {
   );
   return {
     ...actual,
-    fetchAndParseMlbStatsApiSchedule: vi.fn()
+    fetchAndParseMlbStatsApiSchedule: vi.fn(),
+    fetchMlbStatsApiBoxscore: vi.fn(),
+    fetchMlbStatsApiLinescore: vi.fn(),
+    fetchMlbStatsApiPitcherSeasonStats: vi.fn()
   };
 });
 
 import { loadLiveSlate } from "../../lib/services/loadLiveSlate";
-import { fetchAndParseMlbStatsApiSchedule } from "../../lib/adapters/mlbStatsApi";
+import {
+  fetchAndParseMlbStatsApiSchedule,
+  fetchMlbStatsApiBoxscore,
+  fetchMlbStatsApiLinescore,
+  fetchMlbStatsApiPitcherSeasonStats
+} from "../../lib/adapters/mlbStatsApi";
+import { fetchWithTimeout } from "../../lib/adapters/fetchWithTimeout";
+
+const parsedFixture = parseMlbStatsApiGamePayload(rawFixture);
+if (!parsedFixture.success) {
+  throw new Error(parsedFixture.error);
+}
+
+const noOfficialStarterGame = {
+  ...parsedFixture.data,
+  teams: {
+    away: {
+      ...parsedFixture.data.teams.away,
+      probablePitcher: null
+    },
+    home: {
+      ...parsedFixture.data.teams.home,
+      probablePitcher: null
+    }
+  }
+};
+
+const pitcherStatsPayload = {
+  stats: [
+    {
+      splits: [
+        {
+          stat: {
+            inningsPitched: "35.0",
+            gamesStarted: 6,
+            era: "3.20",
+            whip: "1.10",
+            strikeoutsPer9Inn: "9.5",
+            walksPer9Inn: "2.2",
+            homeRunsPer9: "0.8"
+          }
+        }
+      ]
+    }
+  ]
+};
+
+const teamHittingStatsPayload = {
+  stats: [
+    {
+      splits: [
+        {
+          stat: {
+            runs: "120",
+            gamesPlayed: "25",
+            obp: ".330"
+          }
+        }
+      ]
+    }
+  ]
+};
+
+const teamReliefStatsPayload = {
+  stats: [
+    {
+      splits: [
+        {
+          split: { code: "rp" },
+          stat: { era: "3.90" }
+        }
+      ]
+    }
+  ]
+};
+
+const makeBatter = (id: number, fullName: string, battingOrder: string) => ({
+  person: { id, fullName },
+  battingOrder,
+  seasonStats: {
+    batting: {
+      plateAppearances: "100",
+      avg: ".270",
+      obp: ".340",
+      slg: ".450",
+      strikeOuts: "20",
+      baseOnBalls: "10",
+      homeRuns: "5",
+      stolenBases: "2"
+    }
+  }
+});
+
+const boxscoreWithoutGameStarters = {
+  teams: {
+    away: {
+      teamStats: {
+        pitching: { era: "4.00", whip: "1.25" }
+      },
+      players: {
+        ID543037: {
+          person: { id: 543037, fullName: "Gerrit Cole" },
+          stats: { pitching: {} },
+          seasonStats: { pitching: {} }
+        },
+        ID100001: makeBatter(100001, "Aaron Judge", "100")
+      }
+    },
+    home: {
+      teamStats: {
+        pitching: { era: "4.10", whip: "1.30" }
+      },
+      players: {
+        ID519242: {
+          person: { id: 519242, fullName: "Chris Sale" },
+          stats: { pitching: {} },
+          seasonStats: { pitching: {} }
+        },
+        ID200001: makeBatter(200001, "Jarren Duran", "100")
+      }
+    }
+  }
+};
+
+const projectedGame: ProjectedGameData = {
+  game_id: "mlb-2026-03-27-nyy-bos" as never,
+  away_starter: {
+    player_id: "gerrit-cole" as never,
+    team_id: "nyy" as never,
+    handedness: "R",
+    starting_status: "probable",
+    confidence: "medium"
+  },
+  home_starter: {
+    player_id: "chris-sale" as never,
+    team_id: "bos" as never,
+    handedness: "L",
+    starting_status: "probable",
+    confidence: "medium"
+  },
+  away_lineup: null,
+  home_lineup: null
+};
 
 // ---------------------------------------------------------------------------
 // 1. Behavioral equivalence: no-arg vs explicit undefined baseline
@@ -211,5 +364,112 @@ describe("loadLiveSlate — merge-wiring does not change official-only behavior"
 
     expect(bare.error).toBe(explicitUndefined.error);
     expect(bare.error).toBe(emptyMaps.error);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 4. Projected starter source reaches live preparation
+// ---------------------------------------------------------------------------
+
+describe("loadLiveSlate - projected starter flow into preparation", () => {
+  const mockTeamStatFetches = (): void => {
+    vi.mocked(fetchWithTimeout).mockImplementation(async (input) => {
+      const url = String(input);
+
+      if (url.includes("group=hitting")) {
+        return {
+          response: {
+            ok: true,
+            json: async () => teamHittingStatsPayload
+          },
+          error: null
+        } as never;
+      }
+
+      if (url.includes("sitCodes=rp")) {
+        return {
+          response: {
+            ok: true,
+            json: async () => teamReliefStatsPayload
+          },
+          error: null
+        } as never;
+      }
+
+      return {
+        response: null,
+        error: "unexpected fetch"
+      } as never;
+    });
+  };
+
+  const mockOneGameScheduleAndBoxscore = (): void => {
+    vi.mocked(fetchAndParseMlbStatsApiSchedule).mockResolvedValue({
+      success: true,
+      data: {
+        rawGames: [rawFixture],
+        parsedGames: [noOfficialStarterGame]
+      }
+    } as never);
+    vi.mocked(fetchMlbStatsApiBoxscore).mockResolvedValue({
+      success: true,
+      data: boxscoreWithoutGameStarters
+    } as never);
+    vi.mocked(fetchMlbStatsApiLinescore).mockResolvedValue({
+      success: false,
+      error: "linescore unavailable"
+    } as never);
+    vi.mocked(fetchMlbStatsApiPitcherSeasonStats).mockResolvedValue({
+      success: true,
+      data: pitcherStatsPayload
+    } as never);
+    mockTeamStatFetches();
+  };
+
+  it("projects starters through the merge path before prepareGameInputs", async () => {
+    mockOneGameScheduleAndBoxscore();
+
+    const result = await loadLiveSlate("2026-03-27", {
+      projectedGames: new Map([[projectedGame.game_id, projectedGame]])
+    });
+
+    expect(result.success).toBe(true);
+    if (!result.success) throw new Error(result.error);
+
+    const prepared = result.data.games[0]?.preparedGame;
+    expect(prepared).toBeDefined();
+    expect(prepared?.away_starter?.player_id).toBe("gerrit-cole");
+    expect(prepared?.home_starter?.player_id).toBe("chris-sale");
+    expect(prepared?.has_both_starters).toBe(true);
+    expect(prepared?.blocked.blocked_reason).toBeNull();
+
+    const cards = buildPlayerCards(prepared!);
+    expect(cards.players.length).toBeGreaterThan(0);
+    expect(fetchMlbStatsApiPitcherSeasonStats).toHaveBeenCalledWith(543037, "2026");
+    expect(fetchMlbStatsApiPitcherSeasonStats).toHaveBeenCalledWith(519242, "2026");
+  });
+
+  it("remains fail-closed when no official, projected, or inferred starter source exists", async () => {
+    mockOneGameScheduleAndBoxscore();
+
+    const result = await loadLiveSlate("2026-03-27");
+
+    expect(result.success).toBe(true);
+    if (!result.success) throw new Error(result.error);
+
+    const prepared = result.data.games[0]?.preparedGame;
+    expect(prepared).toBeDefined();
+    expect(prepared?.away_starter).toBeNull();
+    expect(prepared?.home_starter).toBeNull();
+    expect(prepared?.has_both_starters).toBe(false);
+    expect(prepared?.blocked.blocked_reason).toContain(
+      "Missing away_starter preparation data"
+    );
+    expect(prepared?.blocked.blocked_reason).toContain(
+      "Missing home_starter preparation data"
+    );
+
+    const cards = buildPlayerCards(prepared!);
+    expect(cards.players).toHaveLength(0);
   });
 });
