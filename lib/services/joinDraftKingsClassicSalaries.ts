@@ -11,6 +11,9 @@ import {
   type PlayerCard
 } from "./buildPlayerCard";
 import { checkProjectionReconciliation } from "./checkProjectionReconciliation";
+import type { IndexedCrosswalk } from "@lib/crosswalk/resolvePlayerIdentity";
+import { resolvePlayerIdentity } from "@lib/crosswalk/resolvePlayerIdentity";
+import { parseCanonicalPlayerId } from "@lib/contracts/player-crosswalk";
 
 export interface DraftKingsClassicPlayerCard extends PlayerCard {
   readonly draftkings_classic: DraftKingsClassicJoinState;
@@ -20,6 +23,8 @@ export interface JoinDraftKingsClassicSalariesInput {
   readonly game: GameCard;
   readonly players: readonly PlayerCard[];
   readonly salary_slate: DraftKingsClassicSalarySlate;
+  /** When provided, salary join uses crosswalk-driven resolution instead of legacy fallback. */
+  readonly crosswalk?: IndexedCrosswalk;
 }
 
 export interface DraftKingsClassicPlayerCardsResult {
@@ -100,10 +105,52 @@ const toHeldPlayer = (
   draftkings_classic: buildHeldJoinState(draftGroupId, reason)
 });
 
+/**
+ * Match a player to a salary entry via the crosswalk resolver.
+ *
+ * Resolution cascade: mlb_stats_api_id → dk_player_id → rotowire_slug → name+team → null.
+ * Once resolved, the crosswalk entry's dk_player_id is used to look up the salary.
+ * If unresolved or the crosswalk entry has no dk_player_id link, returns null (fail closed).
+ */
+const matchSalaryViaCrosswalk = (
+  player: PlayerCard,
+  crosswalk: IndexedCrosswalk,
+  salaryByDkPlayerId: ReadonlyMap<string, DraftKingsClassicSalarySlate["salaries"][number]>
+): DraftKingsClassicSalarySlate["salaries"][number] | null => {
+  const resolution = resolvePlayerIdentity(crosswalk, {
+    mlb_stats_api_id: player.mlb_stats_api_id,
+    player_id: player.player_id,
+    team_abbreviation: player.team_id.toUpperCase()
+  });
+
+  if (resolution.canonical_player_id === null) {
+    return null;
+  }
+
+  // Player resolved — retrieve the crosswalk entry via the canonical ID.
+  // canonical_player_id = "mlb-{mlb_stats_api_id}", so parse to get the MLB ID
+  // and look up in the primary index. This works for ALL resolution paths
+  // (mlb_stats_api_id, dk_player_id, rotowire_slug, name+team).
+  const mlbId = parseCanonicalPlayerId(resolution.canonical_player_id);
+  const crosswalkEntry = mlbId !== null ? crosswalk.byMlbStatsApiId.get(mlbId) : null;
+
+  if (!crosswalkEntry) {
+    return null;
+  }
+
+  if (crosswalkEntry.dk_player_id === null) {
+    return null;
+  }
+
+  const salaryEntry = salaryByDkPlayerId.get(crosswalkEntry.dk_player_id);
+  return salaryEntry ?? null;
+};
+
 export const joinDraftKingsClassicSalaries = ({
   game,
   players,
-  salary_slate
+  salary_slate,
+  crosswalk
 }: JoinDraftKingsClassicSalariesInput): DraftKingsClassicPlayerCardsResult => {
   const reconciliation = checkProjectionReconciliation({ game, players });
   const draftGroupId = salary_slate.draft_group_id;
@@ -128,31 +175,28 @@ export const joinDraftKingsClassicSalaries = ({
     };
   }
 
+  // Build salary index keyed by DK player_id (used by both crosswalk and legacy paths)
   const salaryByPlayerId = new Map(
     salary_slate.salaries.map((salaryEntry) => [String(salaryEntry.player_id), salaryEntry] as const)
   );
 
-  // Secondary name-based index for projected-tier fallback.
-  // When a player comes from the projected tier (Rotowire), mlb_stats_api_id is null
-  // and player_id is a slug ("gerrit-cole") that cannot match DK numeric IDs.
-  // This index lets the join fall back to matching the slug against DK display_name.
-  //
-  // Ambiguity guard: if two or more DK entries normalize to the same name key,
-  // mark that key as ambiguous (null). The fallback will not use ambiguous keys —
-  // the player stays held rather than risk matching the wrong salary entry.
+  // Legacy name-based fallback (only used when no crosswalk is provided)
   const AMBIGUOUS_SENTINEL = null;
-  const salaryByNormalizedName = new Map<string, typeof salary_slate.salaries[number] | null>();
-  for (const entry of salary_slate.salaries) {
-    const key = normalizeNameForJoin(entry.display_name);
-    if (!key) {
-      continue;
-    }
-    if (salaryByNormalizedName.has(key)) {
-      salaryByNormalizedName.set(key, AMBIGUOUS_SENTINEL);
-    } else {
-      salaryByNormalizedName.set(key, entry);
-    }
-  }
+  const salaryByNormalizedName = crosswalk
+    ? null
+    : (() => {
+        const map = new Map<string, typeof salary_slate.salaries[number] | null>();
+        for (const entry of salary_slate.salaries) {
+          const key = normalizeNameForJoin(entry.display_name);
+          if (!key) continue;
+          if (map.has(key)) {
+            map.set(key, AMBIGUOUS_SENTINEL);
+          } else {
+            map.set(key, entry);
+          }
+        }
+        return map;
+      })();
 
   const joinedPlayers = players.map<DraftKingsClassicPlayerCard>((player) => {
     if (player.blocked.is_blocked) {
@@ -171,16 +215,46 @@ export const joinDraftKingsClassicSalaries = ({
       );
     }
 
-    const salaryJoinKey = player.mlb_stats_api_id ?? player.player_id;
-    const matchedSalary = salaryByPlayerId.get(salaryJoinKey)
-      ?? salaryByNormalizedName.get(normalizeNameForJoin(player.player_id));
+    let matchedSalary: typeof salary_slate.salaries[number] | null | undefined;
 
-    if (!matchedSalary) {
-      return toHeldPlayer(
-        player,
-        draftGroupId,
-        "DraftKings Classic salary missing for reconciled player row"
-      );
+    if (crosswalk) {
+      // Crosswalk-driven path: resolve identity → use dk_player_id → match salary
+      matchedSalary = matchSalaryViaCrosswalk(player, crosswalk, salaryByPlayerId);
+
+      if (!matchedSalary) {
+        const resolution = resolvePlayerIdentity(crosswalk, {
+          mlb_stats_api_id: player.mlb_stats_api_id,
+          player_id: player.player_id,
+          team_abbreviation: player.team_id.toUpperCase()
+        });
+
+        if (resolution.canonical_player_id === null) {
+          return toHeldPlayer(
+            player,
+            draftGroupId,
+            "Crosswalk: player identity unresolved — cannot match DraftKings salary"
+          );
+        }
+
+        return toHeldPlayer(
+          player,
+          draftGroupId,
+          "Crosswalk: player resolved but no dk_player_id link — cannot match DraftKings salary"
+        );
+      }
+    } else {
+      // Legacy path: mlb_stats_api_id / player_id primary match + name fallback
+      const salaryJoinKey = player.mlb_stats_api_id ?? player.player_id;
+      matchedSalary = salaryByPlayerId.get(salaryJoinKey)
+        ?? salaryByNormalizedName?.get(normalizeNameForJoin(player.player_id));
+
+      if (!matchedSalary) {
+        return toHeldPlayer(
+          player,
+          draftGroupId,
+          "DraftKings Classic salary missing for reconciled player row"
+        );
+      }
     }
 
     return {
@@ -224,5 +298,6 @@ export const buildDraftKingsClassicPlayerCards = (
   joinDraftKingsClassicSalaries({
     game: buildGameCard(preparedInputs),
     players: buildPlayerCards(preparedInputs, options).players,
-    salary_slate: salarySlate
+    salary_slate: salarySlate,
+    ...(options.crosswalk ? { crosswalk: options.crosswalk } : {})
   });

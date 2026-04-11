@@ -18,6 +18,7 @@ import {
 } from "./joinDraftKingsClassicSalaries";
 import { buildDfsOwnershipPlaceholder } from "./buildDfsOwnershipPlaceholder";
 import type { LiveSlateCounts, LiveSlateSourceGame } from "./loadLiveSlate";
+import type { IndexedCrosswalk } from "@lib/crosswalk/resolvePlayerIdentity";
 
 export interface BuildDfsEdgeBoardOptions {
   readonly source: string;
@@ -37,6 +38,8 @@ export interface BuildDfsEdgeBoardOptions {
     readonly seed?: number;
     readonly iterations?: number;
   };
+  /** Pre-indexed crosswalk. When omitted, loaded from the committed crosswalk file. */
+  readonly crosswalk?: IndexedCrosswalk;
 }
 
 const buildMatchupLabel = (sourceGame: LiveSlateSourceGame): string =>
@@ -235,7 +238,10 @@ const buildRows = (
     const joinedPlayers = buildDraftKingsClassicPlayerCards(
       sourceGame.preparedGame,
       options.salary_slate,
-      options.simulation ? { simulation: options.simulation } : {}
+      {
+        ...(options.simulation ? { simulation: options.simulation } : {}),
+        ...(options.crosswalk ? { crosswalk: options.crosswalk } : {})
+      }
     ).players;
 
     return joinedPlayers

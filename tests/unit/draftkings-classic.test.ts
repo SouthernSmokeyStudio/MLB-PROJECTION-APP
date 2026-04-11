@@ -21,6 +21,9 @@ import {
   joinDraftKingsClassicSalaries,
   normalizeNameForJoin
 } from "../../lib/services/joinDraftKingsClassicSalaries";
+import { indexCrosswalk } from "../../lib/crosswalk/resolvePlayerIdentity";
+import type { PlayerCrosswalk, PlayerCrosswalkEntry } from "../../lib/contracts/player-crosswalk";
+import { normalizeNameForJoin as normalizeNameCrosswalk } from "../../lib/crosswalk/normalize";
 
 const prepared = preparedFixture as unknown as PreparedGameInputs;
 
@@ -1084,6 +1087,366 @@ describe("DraftKings Classic salary join", () => {
       expect(board.counts.matched_salaries).toBeLessThan(playerCards.length);
       expect(board.counts.matched_salaries).toBe(playerCards.length - 1);
       expect(board.summary.held_players).toBeGreaterThan(0);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // S3: Crosswalk-driven salary join
+  // ---------------------------------------------------------------------------
+
+  describe("crosswalk-driven salary join", () => {
+    const makeCrosswalkEntry = (
+      overrides: Partial<PlayerCrosswalkEntry> & {
+        canonical_player_id: string;
+        mlb_stats_api_id: string;
+        display_name: string;
+        team_abbreviation: string;
+      }
+    ): PlayerCrosswalkEntry => ({
+      normalized_name: normalizeNameCrosswalk(overrides.display_name),
+      position: "P",
+      throws: "R",
+      seeded_at: "2026-04-10T00:00:00Z",
+      dk_player_id: null,
+      dk_player_dk_id: null,
+      rotowire_slug: null,
+      linked_at: null,
+      linked_via: null,
+      ...overrides
+    });
+
+    const makeCrosswalkFixture = (entries: PlayerCrosswalkEntry[]): PlayerCrosswalk => ({
+      version: 1,
+      generated_at: "2026-04-10T00:00:00Z",
+      entry_count: entries.length,
+      entries
+    });
+
+    /**
+     * Build a salary slate where each entry's player_id is the DK player ID
+     * (matching crosswalk.dk_player_id for linked entries).
+     */
+    const makeDkSalarySlate = (
+      entries: readonly { dkPlayerId: string; salary: number; displayName: string; team: string }[]
+    ): DraftKingsClassicSalarySlate => ({
+      provider: "draftkings",
+      contest_type: "classic",
+      draft_group_id: "145020",
+      source: {
+        provider: "draftkings",
+        endpoint: "https://api.draftkings.com/draftgroups/v1/draftgroups/145020/draftables?format=json",
+        fetched_at: asISOTimestamp("2026-04-06T17:00:00Z"),
+        raw_payload_hash: null
+      },
+      salaries: entries.map((e, i) => ({
+        draftable_id: String(900000 + i),
+        player_id: asPlayerId(e.dkPlayerId),
+        player_dk_id: String(800000 + i),
+        display_name: e.displayName,
+        short_name: e.displayName.split(" ")[0]?.charAt(0) + ". " + (e.displayName.split(" ")[1] ?? ""),
+        position: "SP",
+        roster_slot_id: 110,
+        salary: e.salary,
+        team_abbreviation: e.team,
+        competition_id: "6157701",
+        competition_name: "NYY @ BOS",
+        competition_start: asISOTimestamp("2026-03-27T19:05:00Z")
+      }))
+    });
+
+    it("player resolved by mlb_stats_api_id with linked dk_player_id gets salary", () => {
+      const game = buildGameCard(prepared);
+      const realPlayers = buildPlayerCards(prepared).players;
+      const realPitcher = realPlayers.find((p) => p.deterministic_summary?.kind === "pitcher");
+      if (!realPitcher) throw new Error("Need a pitcher");
+
+      const pitcher: PlayerCard = {
+        ...realPitcher,
+        player_id: "gerrit-cole",
+        mlb_stats_api_id: "543037"
+      };
+
+      const crosswalk = indexCrosswalk(makeCrosswalkFixture([
+        makeCrosswalkEntry({
+          canonical_player_id: "mlb-543037",
+          mlb_stats_api_id: "543037",
+          display_name: "Gerrit Cole",
+          team_abbreviation: "NYY",
+          dk_player_id: "DK-COLE-99",
+          linked_at: "2026-04-10T00:00:00Z",
+          linked_via: "script-dk-salary-match"
+        })
+      ]));
+
+      const salarySlate = makeDkSalarySlate([
+        { dkPlayerId: "DK-COLE-99", salary: 10200, displayName: "Gerrit Cole", team: "NYY" }
+      ]);
+
+      const result = joinDraftKingsClassicSalaries({
+        game: { ...game, away_team_id: pitcher.team_id, home_team_id: pitcher.team_id },
+        players: [pitcher],
+        salary_slate: salarySlate,
+        crosswalk
+      });
+
+      expect(result.ready_players).toBe(1);
+      expect(result.held_players).toBe(0);
+      const joined = result.players[0]!;
+      expect(joined.draftkings_classic.blocked.is_blocked).toBe(false);
+      expect(joined.fantasy_summary?.salary).toBe(10200);
+    });
+
+    it("player resolved by dk_player_id gets salary", () => {
+      const game = buildGameCard(prepared);
+      const realPlayers = buildPlayerCards(prepared).players;
+      const realBatter = realPlayers.find((p) => p.deterministic_summary?.kind === "batter");
+      if (!realBatter) throw new Error("Need a batter");
+
+      // player_id IS the DK player ID (simulating DK-sourced flow)
+      const batter: PlayerCard = {
+        ...realBatter,
+        player_id: "DK-JUDGE-77",
+        mlb_stats_api_id: null
+      };
+
+      const crosswalk = indexCrosswalk(makeCrosswalkFixture([
+        makeCrosswalkEntry({
+          canonical_player_id: "mlb-592450",
+          mlb_stats_api_id: "592450",
+          display_name: "Aaron Judge",
+          team_abbreviation: "NYY",
+          dk_player_id: "DK-JUDGE-77",
+          linked_at: "2026-04-10T00:00:00Z",
+          linked_via: "script-dk-salary-match"
+        })
+      ]));
+
+      const salarySlate = makeDkSalarySlate([
+        { dkPlayerId: "DK-JUDGE-77", salary: 9500, displayName: "Aaron Judge", team: "NYY" }
+      ]);
+
+      const result = joinDraftKingsClassicSalaries({
+        game: { ...game, away_team_id: batter.team_id, home_team_id: batter.team_id },
+        players: [batter],
+        salary_slate: salarySlate,
+        crosswalk
+      });
+
+      expect(result.ready_players).toBe(1);
+      expect(result.held_players).toBe(0);
+      expect(result.players[0]!.fantasy_summary?.salary).toBe(9500);
+    });
+
+    it("player resolved by rotowire_slug gets salary only if crosswalk links to dk_player_id", () => {
+      const game = buildGameCard(prepared);
+      const realPlayers = buildPlayerCards(prepared).players;
+      const realPitcher = realPlayers.find((p) => p.deterministic_summary?.kind === "pitcher");
+      if (!realPitcher) throw new Error("Need a pitcher");
+
+      const pitcher: PlayerCard = {
+        ...realPitcher,
+        player_id: "chris-sale",
+        mlb_stats_api_id: null
+      };
+
+      // Crosswalk has rotowire_slug AND dk_player_id linked
+      const crosswalk = indexCrosswalk(makeCrosswalkFixture([
+        makeCrosswalkEntry({
+          canonical_player_id: "mlb-519242",
+          mlb_stats_api_id: "519242",
+          display_name: "Chris Sale",
+          team_abbreviation: "BOS",
+          throws: "L",
+          rotowire_slug: "chris-sale",
+          dk_player_id: "DK-SALE-42",
+          linked_at: "2026-04-10T00:00:00Z",
+          linked_via: "script-dk-salary-match"
+        })
+      ]));
+
+      const salarySlate = makeDkSalarySlate([
+        { dkPlayerId: "DK-SALE-42", salary: 9800, displayName: "Chris Sale", team: "BOS" }
+      ]);
+
+      const result = joinDraftKingsClassicSalaries({
+        game: { ...game, away_team_id: pitcher.team_id, home_team_id: pitcher.team_id },
+        players: [pitcher],
+        salary_slate: salarySlate,
+        crosswalk
+      });
+
+      expect(result.ready_players).toBe(1);
+      expect(result.players[0]!.fantasy_summary?.salary).toBe(9800);
+    });
+
+    it("resolved player with no dk_player_id link is held", () => {
+      const game = buildGameCard(prepared);
+      const realPlayers = buildPlayerCards(prepared).players;
+      const realPitcher = realPlayers.find((p) => p.deterministic_summary?.kind === "pitcher");
+      if (!realPitcher) throw new Error("Need a pitcher");
+
+      const pitcher: PlayerCard = {
+        ...realPitcher,
+        player_id: "gerrit-cole",
+        mlb_stats_api_id: "543037"
+      };
+
+      // Crosswalk resolves Cole but dk_player_id is null (not yet linked)
+      const crosswalk = indexCrosswalk(makeCrosswalkFixture([
+        makeCrosswalkEntry({
+          canonical_player_id: "mlb-543037",
+          mlb_stats_api_id: "543037",
+          display_name: "Gerrit Cole",
+          team_abbreviation: "NYY",
+          dk_player_id: null
+        })
+      ]));
+
+      const salarySlate = makeDkSalarySlate([
+        { dkPlayerId: "DK-COLE-99", salary: 10200, displayName: "Gerrit Cole", team: "NYY" }
+      ]);
+
+      const result = joinDraftKingsClassicSalaries({
+        game: { ...game, away_team_id: pitcher.team_id, home_team_id: pitcher.team_id },
+        players: [pitcher],
+        salary_slate: salarySlate,
+        crosswalk
+      });
+
+      expect(result.ready_players).toBe(0);
+      expect(result.held_players).toBe(1);
+      expect(result.players[0]!.draftkings_classic.blocked.is_blocked).toBe(true);
+      expect(result.players[0]!.draftkings_classic.blocked.blocked_reason).toContain("no dk_player_id link");
+      expect(result.players[0]!.fantasy_summary?.salary).toBeNull();
+    });
+
+    it("unresolved player is held", () => {
+      const game = buildGameCard(prepared);
+      const realPlayers = buildPlayerCards(prepared).players;
+      const realPitcher = realPlayers.find((p) => p.deterministic_summary?.kind === "pitcher");
+      if (!realPitcher) throw new Error("Need a pitcher");
+
+      const pitcher: PlayerCard = {
+        ...realPitcher,
+        player_id: "unknown-pitcher",
+        mlb_stats_api_id: null
+      };
+
+      // Empty crosswalk — nobody resolves
+      const crosswalk = indexCrosswalk(makeCrosswalkFixture([]));
+
+      const salarySlate = makeDkSalarySlate([
+        { dkPlayerId: "DK-999", salary: 5000, displayName: "Nobody", team: "NYY" }
+      ]);
+
+      const result = joinDraftKingsClassicSalaries({
+        game: { ...game, away_team_id: pitcher.team_id, home_team_id: pitcher.team_id },
+        players: [pitcher],
+        salary_slate: salarySlate,
+        crosswalk
+      });
+
+      expect(result.ready_players).toBe(0);
+      expect(result.held_players).toBe(1);
+      expect(result.players[0]!.draftkings_classic.blocked.is_blocked).toBe(true);
+      expect(result.players[0]!.draftkings_classic.blocked.blocked_reason).toContain("unresolved");
+      expect(result.players[0]!.fantasy_summary?.salary).toBeNull();
+    });
+
+    it("ambiguity remains fail-closed in crosswalk path", () => {
+      const game = buildGameCard(prepared);
+      const realPlayers = buildPlayerCards(prepared).players;
+      const realPitcher = realPlayers.find((p) => p.deterministic_summary?.kind === "pitcher");
+      if (!realPitcher) throw new Error("Need a pitcher");
+
+      const pitcher: PlayerCard = {
+        ...realPitcher,
+        player_id: "will-smith",
+        mlb_stats_api_id: null
+      };
+
+      // Two Will Smiths on LAD — ambiguous name+team composite
+      const crosswalk = indexCrosswalk(makeCrosswalkFixture([
+        makeCrosswalkEntry({
+          canonical_player_id: "mlb-100001",
+          mlb_stats_api_id: "100001",
+          display_name: "Will Smith",
+          team_abbreviation: "NYY",
+          dk_player_id: "DK-WS-1"
+        }),
+        makeCrosswalkEntry({
+          canonical_player_id: "mlb-100002",
+          mlb_stats_api_id: "100002",
+          display_name: "Will Smith",
+          team_abbreviation: "NYY",
+          dk_player_id: "DK-WS-2"
+        })
+      ]));
+
+      const salarySlate = makeDkSalarySlate([
+        { dkPlayerId: "DK-WS-1", salary: 5000, displayName: "Will Smith", team: "NYY" },
+        { dkPlayerId: "DK-WS-2", salary: 6000, displayName: "Will Smith", team: "NYY" }
+      ]);
+
+      const result = joinDraftKingsClassicSalaries({
+        game: { ...game, away_team_id: pitcher.team_id, home_team_id: pitcher.team_id },
+        players: [pitcher],
+        salary_slate: salarySlate,
+        crosswalk
+      });
+
+      // Ambiguous — both name+team resolves to null (fail closed)
+      expect(result.ready_players).toBe(0);
+      expect(result.held_players).toBe(1);
+      expect(result.players[0]!.draftkings_classic.blocked.is_blocked).toBe(true);
+    });
+
+    it("composite name+team-resolved player with linked dk_player_id gets salary", () => {
+      const game = buildGameCard(prepared);
+      const realPlayers = buildPlayerCards(prepared).players;
+      const realPitcher = realPlayers.find((p) => p.deterministic_summary?.kind === "pitcher");
+      if (!realPitcher) throw new Error("Need a pitcher");
+
+      // Player has no mlb_stats_api_id, player_id is NOT a rotowire slug or dk_player_id.
+      // The ONLY resolution path is composite name+team.
+      const pitcher: PlayerCard = {
+        ...realPitcher,
+        player_id: "Gerrit Cole",
+        mlb_stats_api_id: null
+      };
+
+      // Crosswalk entry: NO rotowire_slug, NO dk_player_id that matches player_id,
+      // but the normalized name ("gerritcole") + team ("NYY") composite matches.
+      const crosswalk = indexCrosswalk(makeCrosswalkFixture([
+        makeCrosswalkEntry({
+          canonical_player_id: "mlb-543037",
+          mlb_stats_api_id: "543037",
+          display_name: "Gerrit Cole",
+          team_abbreviation: "NYY",
+          rotowire_slug: null,
+          dk_player_id: "DK-COLE-99",
+          linked_at: "2026-04-10T00:00:00Z",
+          linked_via: "script-dk-salary-match"
+        })
+      ]));
+
+      const salarySlate = makeDkSalarySlate([
+        { dkPlayerId: "DK-COLE-99", salary: 10200, displayName: "Gerrit Cole", team: "NYY" }
+      ]);
+
+      const result = joinDraftKingsClassicSalaries({
+        game: { ...game, away_team_id: pitcher.team_id, home_team_id: pitcher.team_id },
+        players: [pitcher],
+        salary_slate: salarySlate,
+        crosswalk
+      });
+
+      // Resolved via name+team composite → crosswalk entry has dk_player_id → salary matched
+      expect(result.ready_players).toBe(1);
+      expect(result.held_players).toBe(0);
+      const joined = result.players[0]!;
+      expect(joined.draftkings_classic.blocked.is_blocked).toBe(false);
+      expect(joined.fantasy_summary?.salary).toBe(10200);
     });
   });
 });
