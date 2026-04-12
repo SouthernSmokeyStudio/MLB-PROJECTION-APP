@@ -220,6 +220,37 @@ describe("loadDraftKingsClassicSlate persistence fallback", () => {
     expect(fetchDraftKingsClassicSalarySlate).toHaveBeenCalledTimes(1);
   });
 
+  it("does not label the current live date as replay when later upcoming groups exist", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-10T18:00:00Z"));
+    vi.mocked(fetchUpcomingDraftKingsClassicDraftGroups).mockResolvedValue({
+      success: true,
+      data: [
+        makeDraftGroup({
+          draft_group_id: "145500",
+          min_start_time: asISOTimestamp("2026-04-11T23:05:00Z")
+        })
+      ]
+    });
+
+    try {
+      const loaded = await loadDraftKingsClassicSlate({
+        date: "2026-04-10",
+        artifactDir
+      });
+
+      expect(loaded.success).toBe(true);
+      if (!loaded.success) throw new Error(loaded.error);
+      expect(loaded.data.slates).toHaveLength(0);
+      expect(loaded.data.note).toContain(
+        "No DraftKings Classic salary slate matched the requested date."
+      );
+      expect(loaded.data.note).not.toContain("upcoming capture no longer includes");
+      expect(fetchDraftKingsClassicSalarySlate).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
   it("returns a held slate only when neither persisted nor live upcoming can provide the requested date", async () => {
     vi.mocked(fetchUpcomingDraftKingsClassicDraftGroups).mockResolvedValue(
       {
