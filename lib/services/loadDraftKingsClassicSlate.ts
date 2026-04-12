@@ -324,6 +324,79 @@ const selectDraftKingsClassicGroups = ({
     });
 };
 
+export const backfillDraftKingsClassicSlate = async ({
+  date,
+  artifactDir = DEFAULT_ARTIFACT_DIR
+}: Pick<LoadDraftKingsClassicSlateOptions, "date" | "artifactDir">): Promise<
+  Result<
+    {
+      readonly artifactPath: string;
+      readonly slates: readonly LoadedDraftKingsClassicSlateItem[];
+    },
+    string
+  >
+> => {
+  const fetchedGroups = await fetchUpcomingDraftKingsClassicDraftGroups();
+
+  if (!fetchedGroups.success) {
+    return err(fetchedGroups.error);
+  }
+
+  const selectedGroups = selectDraftKingsClassicGroups({
+    date,
+    groups: fetchedGroups.data
+  });
+
+  if (selectedGroups.length === 0) {
+    return err("No DraftKings Classic salary slate matched the requested date.");
+  }
+
+  const fetchedSlates = await Promise.all(
+    selectedGroups.map((group) => fetchDraftKingsClassicSalarySlate(group.draft_group_id))
+  );
+
+  const slates: LoadedDraftKingsClassicSlateItem[] = [];
+  const persistEntries: Array<{
+    readonly draftGroup: DraftKingsClassicDraftGroup;
+    readonly label: string;
+    readonly salarySlate: DraftKingsClassicSalarySlate;
+  }> = [];
+
+  for (let i = 0; i < selectedGroups.length; i++) {
+    const group = selectedGroups[i];
+    const result = fetchedSlates[i];
+    if (!group || !result) continue;
+    if (!result.success) continue;
+    const label = buildDraftKingsClassicLabel(group);
+    slates.push({
+      draft_group_id: group.draft_group_id,
+      label,
+      min_start_time: group.min_start_time,
+      max_start_time: group.max_start_time,
+      salary_slate: result.data
+    });
+    persistEntries.push({ draftGroup: group, label, salarySlate: result.data });
+  }
+
+  if (slates.length === 0) {
+    return err("All DraftKings Classic salary slate fetches failed");
+  }
+
+  const persistResult = await persistDraftKingsClassicSlate({
+    date,
+    artifactDir,
+    slates: persistEntries
+  });
+
+  if (!persistResult.success) {
+    return err(persistResult.error);
+  }
+
+  return ok({
+    artifactPath: persistResult.data,
+    slates
+  });
+};
 export const loadDraftKingsClassicSlate = async ({
   date,
   draftGroupId,
