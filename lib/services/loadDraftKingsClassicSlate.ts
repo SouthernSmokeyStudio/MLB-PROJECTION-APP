@@ -13,16 +13,24 @@ import { asISOTimestamp, ok, err, type Result } from "@lib/contracts/types";
 const MLB_SPORT_ID = 2;
 const DRAFTKINGS_CLASSIC_CONTEST_TYPE_ID = 28;
 const DRAFTKINGS_CLASSIC_GAME_TYPE_ID = 2;
-const PERSISTED_DK_CLASSIC_VERSION = 1;
+const PERSISTED_DK_CLASSIC_VERSION = 2;
 const DEFAULT_ARTIFACT_DIR = join(process.cwd(), "data", "draftkings-classic");
+
+/** One salary slate with its draft group metadata. */
+export interface LoadedDraftKingsClassicSlateItem {
+  readonly draft_group_id: string;
+  readonly label: string;
+  readonly min_start_time: string;
+  readonly max_start_time: string;
+  readonly salary_slate: DraftKingsClassicSalarySlate;
+}
 
 export interface LoadedDraftKingsClassicSlate {
   readonly source: "draftkings-classic-live" | "draftkings-classic-persisted";
   readonly date: string;
   readonly generated_at: string;
-  readonly draft_group: DraftKingsClassicDraftGroup | null;
-  readonly label: string | null;
-  readonly salary_slate: DraftKingsClassicSalarySlate | null;
+  /** All same-date Classic slates discovered. Empty when none matched. */
+  readonly slates: readonly LoadedDraftKingsClassicSlateItem[];
   readonly note: string | null;
 }
 
@@ -32,14 +40,26 @@ export interface LoadDraftKingsClassicSlateOptions {
   readonly artifactDir?: string;
 }
 
-interface PersistedDraftKingsClassicSlate {
-  readonly version: 1;
-  readonly date: string;
-  readonly persisted_at: string;
-  readonly source: "draftkings-classic-upcoming";
+/** One entry inside the version-2 persisted artifact. */
+interface PersistedDraftKingsClassicSlateEntry {
   readonly draft_group: DraftKingsClassicDraftGroup;
   readonly label: string;
   readonly salary_slate: DraftKingsClassicSalarySlate;
+}
+
+/**
+ * Version 2 — multi-slate artifact.  All same-date Classic slates are stored
+ * in a `slates` array so that the fallback path can reconstruct the full
+ * same-date inventory when the live upstream has rotated away.
+ *
+ * Version 1 (single-slate) is still accepted on read for backward compat.
+ */
+interface PersistedDraftKingsClassicSlate {
+  readonly version: 2;
+  readonly date: string;
+  readonly persisted_at: string;
+  readonly source: "draftkings-classic-upcoming";
+  readonly slates: readonly PersistedDraftKingsClassicSlateEntry[];
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -73,16 +93,20 @@ const isSalarySlate = (value: unknown): value is DraftKingsClassicSalarySlate =>
   isRecord(value.source) &&
   Array.isArray(value.salaries);
 
+/**
+ * Validates a persisted artifact and returns a normalised array of slate
+ * entries regardless of the on-disk version.
+ *
+ * Version 1 (single draft_group / salary_slate at root) is accepted for
+ * backward compat and promoted to a one-element array.
+ * Version 2 (slates[] array) is the current format.
+ */
 const parsePersistedDraftKingsClassicSlate = (
   parsed: unknown,
   expectedDate: string
-): Result<PersistedDraftKingsClassicSlate, string> => {
+): Result<readonly PersistedDraftKingsClassicSlateEntry[], string> => {
   if (!isRecord(parsed)) {
     return err("DraftKings Classic artifact root is not an object");
-  }
-
-  if (parsed.version !== PERSISTED_DK_CLASSIC_VERSION) {
-    return err(`Unsupported DraftKings Classic artifact version: ${String(parsed.version)}`);
   }
 
   if (parsed.date !== expectedDate) {
@@ -99,23 +123,73 @@ const parsePersistedDraftKingsClassicSlate = (
     return err("DraftKings Classic artifact has unsupported source");
   }
 
-  if (!isDraftGroup(parsed.draft_group)) {
-    return err("DraftKings Classic artifact has invalid draft_group");
+  // ── Version 1 (single-slate, backward compat) ──────────────────────────
+  if (parsed.version === 1) {
+    if (!isDraftGroup(parsed.draft_group)) {
+      return err("DraftKings Classic artifact (v1) has invalid draft_group");
+    }
+
+    if (typeof parsed.label !== "string" || parsed.label.length === 0) {
+      return err("DraftKings Classic artifact (v1) has invalid label");
+    }
+
+    if (!isSalarySlate(parsed.salary_slate)) {
+      return err("DraftKings Classic artifact (v1) has invalid salary_slate");
+    }
+
+    if (parsed.salary_slate.draft_group_id !== parsed.draft_group.draft_group_id) {
+      return err("DraftKings Classic artifact (v1) draft_group_id mismatch");
+    }
+
+    return ok([
+      {
+        draft_group: parsed.draft_group as DraftKingsClassicDraftGroup,
+        label: parsed.label as string,
+        salary_slate: parsed.salary_slate as DraftKingsClassicSalarySlate
+      }
+    ]);
   }
 
-  if (typeof parsed.label !== "string" || parsed.label.length === 0) {
-    return err("DraftKings Classic artifact has invalid label");
+  // ── Version 2 (multi-slate array) ──────────────────────────────────────
+  if (parsed.version !== PERSISTED_DK_CLASSIC_VERSION) {
+    return err(`Unsupported DraftKings Classic artifact version: ${String(parsed.version)}`);
   }
 
-  if (!isSalarySlate(parsed.salary_slate)) {
-    return err("DraftKings Classic artifact has invalid salary_slate");
+  if (!Array.isArray(parsed.slates) || parsed.slates.length === 0) {
+    return err("DraftKings Classic artifact (v2) missing or empty slates array");
   }
 
-  if (parsed.salary_slate.draft_group_id !== parsed.draft_group.draft_group_id) {
-    return err("DraftKings Classic artifact draft_group_id mismatch");
+  const entries: PersistedDraftKingsClassicSlateEntry[] = [];
+
+  for (const raw of parsed.slates as unknown[]) {
+    if (!isRecord(raw)) {
+      return err("DraftKings Classic artifact (v2) slates entry is not an object");
+    }
+
+    if (!isDraftGroup(raw.draft_group)) {
+      return err("DraftKings Classic artifact (v2) slates entry has invalid draft_group");
+    }
+
+    if (typeof raw.label !== "string" || raw.label.length === 0) {
+      return err("DraftKings Classic artifact (v2) slates entry has invalid label");
+    }
+
+    if (!isSalarySlate(raw.salary_slate)) {
+      return err("DraftKings Classic artifact (v2) slates entry has invalid salary_slate");
+    }
+
+    if (raw.salary_slate.draft_group_id !== raw.draft_group.draft_group_id) {
+      return err("DraftKings Classic artifact (v2) slates entry draft_group_id mismatch");
+    }
+
+    entries.push({
+      draft_group: raw.draft_group as DraftKingsClassicDraftGroup,
+      label: raw.label as string,
+      salary_slate: raw.salary_slate as DraftKingsClassicSalarySlate
+    });
   }
 
-  return ok(parsed as unknown as PersistedDraftKingsClassicSlate);
+  return ok(entries);
 };
 
 const loadPersistedDraftKingsClassicSlate = async ({
@@ -124,7 +198,7 @@ const loadPersistedDraftKingsClassicSlate = async ({
 }: {
   readonly date: string;
   readonly artifactDir: string;
-}): Promise<Result<PersistedDraftKingsClassicSlate | null, string>> => {
+}): Promise<Result<readonly LoadedDraftKingsClassicSlateItem[] | null, string>> => {
   const artifactPath = getArtifactPath(date, artifactDir);
   let raw: string;
 
@@ -147,21 +221,36 @@ const loadPersistedDraftKingsClassicSlate = async ({
     return err(`DraftKings Classic artifact is not valid JSON: ${artifactPath}`);
   }
 
-  return parsePersistedDraftKingsClassicSlate(parsed, date);
+  const result = parsePersistedDraftKingsClassicSlate(parsed, date);
+  if (!result.success) {
+    return result;
+  }
+
+  return ok(
+    result.data.map((entry) => ({
+      draft_group_id: entry.draft_group.draft_group_id,
+      label: entry.label,
+      min_start_time: entry.draft_group.min_start_time,
+      max_start_time: entry.draft_group.max_start_time,
+      salary_slate: entry.salary_slate
+    }))
+  );
 };
 
 const persistDraftKingsClassicSlate = async ({
   date,
   artifactDir,
-  draftGroup,
-  label,
-  salarySlate
+  slates
 }: {
   readonly date: string;
   readonly artifactDir: string;
-  readonly draftGroup: DraftKingsClassicDraftGroup;
-  readonly label: string;
-  readonly salarySlate: DraftKingsClassicSalarySlate;
+  /** All successfully fetched same-date slates — the full inventory is persisted
+   *  so the fallback path can reconstruct a complete salary_slate_inventory. */
+  readonly slates: ReadonlyArray<{
+    readonly draftGroup: DraftKingsClassicDraftGroup;
+    readonly label: string;
+    readonly salarySlate: DraftKingsClassicSalarySlate;
+  }>;
 }): Promise<Result<string, string>> => {
   const artifactPath = getArtifactPath(date, artifactDir);
   const artifact: PersistedDraftKingsClassicSlate = {
@@ -169,9 +258,11 @@ const persistDraftKingsClassicSlate = async ({
     date,
     persisted_at: asISOTimestamp(new Date().toISOString()),
     source: "draftkings-classic-upcoming",
-    draft_group: draftGroup,
-    label,
-    salary_slate: salarySlate
+    slates: slates.map(({ draftGroup, label, salarySlate }) => ({
+      draft_group: draftGroup,
+      label,
+      salary_slate: salarySlate
+    }))
   };
 
   try {
@@ -198,7 +289,9 @@ const buildDraftKingsClassicLabel = (
   return `${featuredPrefix}DraftKings Classic${suffix}`;
 };
 
-const selectDraftKingsClassicGroup = ({
+/** When draftGroupId is provided, selects that single group. Otherwise, selects ALL
+ *  same-date MLB Classic groups sorted by sort_order then min_start_time. */
+const selectDraftKingsClassicGroups = ({
   date,
   draftGroupId,
   groups
@@ -206,16 +299,15 @@ const selectDraftKingsClassicGroup = ({
   readonly date: string;
   readonly draftGroupId?: string;
   readonly groups: readonly DraftKingsClassicDraftGroup[];
-}): DraftKingsClassicDraftGroup | null => {
+}): readonly DraftKingsClassicDraftGroup[] => {
   if (draftGroupId) {
-    return (
-      groups.find(
-        (group) =>
-          group.draft_group_id === draftGroupId &&
-          isDraftKingsClassicGroup(group) &&
-          group.min_start_time.slice(0, 10) === date
-      ) ?? null
+    const found = groups.find(
+      (group) =>
+        group.draft_group_id === draftGroupId &&
+        isDraftKingsClassicGroup(group) &&
+        group.min_start_time.slice(0, 10) === date
     );
+    return found ? [found] : [];
   }
 
   return [...groups]
@@ -228,9 +320,8 @@ const selectDraftKingsClassicGroup = ({
       if (left.sort_order !== right.sort_order) {
         return left.sort_order - right.sort_order;
       }
-
       return left.min_start_time.localeCompare(right.min_start_time);
-    })[0] ?? null;
+    });
 };
 
 export const loadDraftKingsClassicSlate = async ({
@@ -244,20 +335,20 @@ export const loadDraftKingsClassicSlate = async ({
   if (!fetchedGroups.success) {
     const persisted = await loadPersistedDraftKingsClassicSlate({ date, artifactDir });
 
-    if (
-      persisted.success &&
-      persisted.data &&
-      (!draftGroupId || persisted.data.draft_group.draft_group_id === draftGroupId)
-    ) {
-      return ok({
-        source: "draftkings-classic-persisted",
-        date,
-        generated_at: generatedAt,
-        draft_group: persisted.data.draft_group,
-        label: persisted.data.label,
-        salary_slate: persisted.data.salary_slate,
-        note: null
-      });
+    if (persisted.success && persisted.data && persisted.data.length > 0) {
+      const filteredSlates = draftGroupId
+        ? persisted.data.filter((s) => s.draft_group_id === draftGroupId)
+        : persisted.data;
+
+      if (filteredSlates.length > 0) {
+        return ok({
+          source: "draftkings-classic-persisted",
+          date,
+          generated_at: generatedAt,
+          slates: filteredSlates,
+          note: null
+        });
+      }
     }
 
     const persistedNote = persisted.success ? null : persisted.error;
@@ -268,36 +359,29 @@ export const loadDraftKingsClassicSlate = async ({
     return err(fetchedGroups.error);
   }
 
-  const selectedGroup = selectDraftKingsClassicGroup(
+  const selectedGroups = selectDraftKingsClassicGroups(
     draftGroupId
-      ? {
-          date,
-          draftGroupId,
-          groups: fetchedGroups.data
-        }
-      : {
-          date,
-          groups: fetchedGroups.data
-        }
+      ? { date, draftGroupId, groups: fetchedGroups.data }
+      : { date, groups: fetchedGroups.data }
   );
 
-  if (!selectedGroup) {
+  if (selectedGroups.length === 0) {
     const persisted = await loadPersistedDraftKingsClassicSlate({ date, artifactDir });
 
-    if (
-      persisted.success &&
-      persisted.data &&
-      (!draftGroupId || persisted.data.draft_group.draft_group_id === draftGroupId)
-    ) {
-      return ok({
-        source: "draftkings-classic-persisted",
-        date,
-        generated_at: generatedAt,
-        draft_group: persisted.data.draft_group,
-        label: persisted.data.label,
-        salary_slate: persisted.data.salary_slate,
-        note: null
-      });
+    if (persisted.success && persisted.data && persisted.data.length > 0) {
+      const filteredSlates = draftGroupId
+        ? persisted.data.filter((s) => s.draft_group_id === draftGroupId)
+        : persisted.data;
+
+      if (filteredSlates.length > 0) {
+        return ok({
+          source: "draftkings-classic-persisted",
+          date,
+          generated_at: generatedAt,
+          slates: filteredSlates,
+          note: null
+        });
+      }
     }
 
     const persistedNote = persisted.success ? null : persisted.error;
@@ -306,9 +390,7 @@ export const loadDraftKingsClassicSlate = async ({
       source: "draftkings-classic-live",
       date,
       generated_at: generatedAt,
-      draft_group: null,
-      label: null,
-      salary_slate: null,
+      slates: [],
       note: [
         draftGroupId
           ? `DraftKings Classic draft group ${draftGroupId} was not available.`
@@ -320,32 +402,57 @@ export const loadDraftKingsClassicSlate = async ({
     });
   }
 
-  const fetchedSlate = await fetchDraftKingsClassicSalarySlate(
-    selectedGroup.draft_group_id
+  // Fetch all selected groups in parallel
+  const fetchedSlates = await Promise.all(
+    selectedGroups.map((group) => fetchDraftKingsClassicSalarySlate(group.draft_group_id))
   );
 
-  if (!fetchedSlate.success) {
-    return err(fetchedSlate.error);
+  const slates: LoadedDraftKingsClassicSlateItem[] = [];
+  /** Parallel array carrying the full DraftGroup for each successfully fetched
+   *  slate — needed to persist group metadata alongside the salary data. */
+  const persistEntries: Array<{
+    readonly draftGroup: DraftKingsClassicDraftGroup;
+    readonly label: string;
+    readonly salarySlate: DraftKingsClassicSalarySlate;
+  }> = [];
+
+  for (let i = 0; i < selectedGroups.length; i++) {
+    const group = selectedGroups[i];
+    const result = fetchedSlates[i];
+    if (!group || !result) continue;
+    if (!result.success) continue;
+    const label = buildDraftKingsClassicLabel(group);
+    slates.push({
+      draft_group_id: group.draft_group_id,
+      label,
+      min_start_time: group.min_start_time,
+      max_start_time: group.max_start_time,
+      salary_slate: result.data
+    });
+    persistEntries.push({ draftGroup: group, label, salarySlate: result.data });
   }
 
-  const label = buildDraftKingsClassicLabel(selectedGroup);
-  const persistedLiveSlate = await persistDraftKingsClassicSlate({
+  if (slates.length === 0) {
+    return err("All DraftKings Classic salary slate fetches failed");
+  }
+
+  // Persist ALL successfully fetched same-date slates as the date-keyed fallback.
+  // The full inventory is needed so the fallback path can reconstruct the complete
+  // salary_slate_inventory when the live upcoming API rotates away from today's groups.
+  // Non-fatal: load continues with live data on persist failure.
+  const persistResult = await persistDraftKingsClassicSlate({
     date,
     artifactDir,
-    draftGroup: selectedGroup,
-    label,
-    salarySlate: fetchedSlate.data
+    slates: persistEntries
   });
 
   return ok({
     source: "draftkings-classic-live",
     date,
     generated_at: generatedAt,
-    draft_group: selectedGroup,
-    label,
-    salary_slate: fetchedSlate.data,
-    note: persistedLiveSlate.success
+    slates,
+    note: persistResult.success
       ? null
-      : `DraftKings Classic salary slate loaded live but persistence failed: ${persistedLiveSlate.error}`
+      : `DraftKings Classic salary slate loaded live but persistence failed: ${persistResult.error}`
   });
 };

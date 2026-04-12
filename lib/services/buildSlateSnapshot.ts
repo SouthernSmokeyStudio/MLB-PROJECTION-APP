@@ -20,6 +20,7 @@ import { buildScheduleBoard } from "./buildScheduleBoard";
 import type { LiveSlateCounts, LiveSlateSourceGame } from "./loadLiveSlate";
 import { loadCrosswalk } from "@lib/crosswalk/loadCrosswalk";
 import { indexCrosswalk } from "@lib/crosswalk/resolvePlayerIdentity";
+import type { LoadedDraftKingsClassicSlateItem } from "./loadDraftKingsClassicSlate";
 
 export interface BuildSlateSnapshotOptions {
   readonly source: string;
@@ -43,6 +44,7 @@ export interface BuildSlateSnapshotOptions {
     "date" | "generated_at" | "counts" | "simulation"
   > & {
     readonly note?: string | null;
+    readonly salary_slate_inventory?: readonly LoadedDraftKingsClassicSlateItem[];
   };
   readonly dfs_edge_reason?: string;
   readonly betting_edge?: Omit<

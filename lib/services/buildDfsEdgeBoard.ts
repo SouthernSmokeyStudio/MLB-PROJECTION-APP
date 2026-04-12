@@ -20,6 +20,7 @@ import {
 import { buildDfsOwnershipPlaceholder } from "./buildDfsOwnershipPlaceholder";
 import type { LiveSlateCounts, LiveSlateSourceGame } from "./loadLiveSlate";
 import type { IndexedCrosswalk } from "@lib/crosswalk/resolvePlayerIdentity";
+import type { LoadedDraftKingsClassicSlateItem } from "./loadDraftKingsClassicSlate";
 
 export interface BuildDfsEdgeBoardOptions {
   readonly source: string;
@@ -34,7 +35,10 @@ export interface BuildDfsEdgeBoardOptions {
     readonly max_start_time: string;
     readonly tags: readonly string[];
   };
-  readonly salary_slate: DraftKingsClassicSalarySlate;
+  /** Full same-date Classic slate inventory. Takes precedence over salary_slate. */
+  readonly salary_slate_inventory?: readonly LoadedDraftKingsClassicSlateItem[];
+  /** Single-slate backward-compat. Used only when salary_slate_inventory is absent. */
+  readonly salary_slate?: DraftKingsClassicSalarySlate;
   readonly simulation?: {
     readonly seed?: number;
     readonly iterations?: number;
@@ -288,12 +292,55 @@ const buildSalaryJoinIdentities = (
 const buildRows = (
   sourceGames: readonly LiveSlateSourceGame[],
   options: BuildDfsEdgeBoardOptions
-): readonly DfsEdgeBoardRow[] =>
-  sourceGames.flatMap((sourceGame) => {
+): readonly DfsEdgeBoardRow[] => {
+  // Resolve the slate input: inventory wins; fall back to single-slate wrapper
+  const salaryInput: readonly LoadedDraftKingsClassicSlateItem[] | DraftKingsClassicSalarySlate =
+    options.salary_slate_inventory ??
+    options.salary_slate ??
+    ([] as readonly LoadedDraftKingsClassicSlateItem[]);
+
+  const selectedSalarySlate: DraftKingsClassicSalarySlate | undefined =
+    options.salary_slate_inventory
+      ? options.salary_slate_inventory.find(
+          (item) => item.draft_group_id === options.draftkings_classic.draft_group_id
+        )?.salary_slate
+      : options.salary_slate;
+
+  const selectedCompetitionGameKeys = new Set(
+    Array.from(
+      (selectedSalarySlate?.salaries ?? []).reduce(
+        (competitions, salary) => {
+          const existingCompetition = competitions.get(salary.competition_id);
+          const teamAbbreviations = new Set(existingCompetition ?? []);
+          teamAbbreviations.add(salary.team_abbreviation.toUpperCase());
+          competitions.set(salary.competition_id, teamAbbreviations);
+          return competitions;
+        },
+        new Map<string, Set<string>>()
+      ).values(),
+      (teamAbbreviations) => Array.from(teamAbbreviations).sort().join('|')
+    )
+  );
+
+  const slateGames =
+    selectedCompetitionGameKeys.size === 0
+      ? sourceGames
+      : sourceGames.filter((sourceGame) => {
+          const gameKey = [
+            sourceGame.canonicalGame.away.team.abbreviation.toUpperCase(),
+            sourceGame.canonicalGame.home.team.abbreviation.toUpperCase()
+          ]
+            .sort()
+            .join('|');
+
+          return selectedCompetitionGameKeys.has(gameKey);
+        });
+
+  return slateGames.flatMap((sourceGame) => {
     const salaryJoinIdentities = buildSalaryJoinIdentities(sourceGame);
     const joinedPlayers = buildDraftKingsClassicPlayerCards(
       sourceGame.preparedGame,
-      options.salary_slate,
+      salaryInput,
       {
         ...(options.simulation ? { simulation: options.simulation } : {}),
         ...(options.crosswalk ? { crosswalk: options.crosswalk } : {}),
@@ -305,7 +352,7 @@ const buildRows = (
       .map((player) => toDfsEdgeBoardRow(sourceGame, player))
       .filter((player): player is DfsEdgeBoardRow => player !== null);
   });
-
+};
 const createEmptySummary = () => ({
   total_players: 0,
   ready_players: 0,
@@ -404,7 +451,9 @@ export const buildDfsEdgeBoard = (
     },
     counts: {
       ...options.counts,
-      salary_entries: options.salary_slate.salaries.length,
+      salary_entries: options.salary_slate_inventory
+        ? options.salary_slate_inventory.reduce((sum, s) => sum + s.salary_slate.salaries.length, 0)
+        : (options.salary_slate?.salaries.length ?? 0),
       matched_salaries: matchedSalaries
     },
     ready_pitchers: readyPitchers,

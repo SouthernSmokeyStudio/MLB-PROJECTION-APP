@@ -114,10 +114,15 @@ const patchProbablePitcher = (
   // Official tier won → canonical already has the right pitcher
   if (mergedStarter.source_tier === "official") return original;
 
-  // Non-official tier won → synthesize a ProbablePitcher from merge winner
+  // Non-official tier won → synthesize a ProbablePitcher from merge winner.
+  // Propagate mlb_stats_api_id from the original when available: this preserves
+  // the numeric id when official data existed before being superseded by a
+  // projected/inferred winner (e.g. a same-day swap).  When original is null
+  // (no official pitcher was ever listed), mlb_stats_api_id stays null here and
+  // is back-filled from the boxscore in loadLiveSlate before reconciliation runs.
   return {
     player_id: mergedStarter.player_id,
-    mlb_stats_api_id: null,
+    mlb_stats_api_id: original?.mlb_stats_api_id ?? null,
     starting_status: mergedStarter.starting_status,
     handedness: mergedStarter.handedness
   };

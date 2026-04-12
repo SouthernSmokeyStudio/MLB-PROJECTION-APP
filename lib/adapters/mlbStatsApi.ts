@@ -264,6 +264,16 @@ export const parseMlbStatsApiGamePayload = (payload: unknown): Result<MlbStatsAp
     return err("Missing gameDate in raw payload");
   }
 
+  // officialDate is the Eastern/local calendar date MLB, DraftKings, and
+  // Rotowire all use.  Late West Coast games start after midnight UTC so their
+  // UTC date (gameDate.slice(0,10)) is T+1, but officialDate stays T+0.
+  // Fall back to the UTC date slice when the field is absent.
+  const rawOfficialDate = readNullableString(payload.officialDate);
+  const officialDate =
+    rawOfficialDate !== null && rawOfficialDate.trim().length > 0
+      ? rawOfficialDate.trim()
+      : gameDate.slice(0, 10);
+
   const teams = parseTeams(payload.teams);
   if (!teams.success) {
     return teams;
@@ -277,6 +287,7 @@ export const parseMlbStatsApiGamePayload = (payload: unknown): Result<MlbStatsAp
   return ok({
     gamePk,
     gameDate,
+    officialDate,
     status: parseStatus(payload.status),
     teams: teams.data,
     venue: venue.data

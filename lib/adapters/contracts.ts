@@ -49,6 +49,14 @@ export interface MlbStatsApiLinescore {
 export interface MlbStatsApiScheduleGame {
   readonly gamePk: number;
   readonly gameDate: string;
+  /**
+   * The official local (Eastern) date for this game as returned by the MLB
+   * Stats API — e.g. "2026-04-11".  Late West Coast games that start after
+   * midnight UTC have a gameDate UTC-date of T+1, but officialDate correctly
+   * reflects the Eastern calendar date that MLB, DraftKings, and Rotowire all
+   * use.  Falls back to the UTC date slice of gameDate when absent.
+   */
+  readonly officialDate: string;
   readonly status: MlbStatsApiGameStatus;
   readonly teams: MlbStatsApiScheduleTeams;
   readonly venue: MlbStatsApiVenue | null;

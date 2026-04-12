@@ -389,7 +389,11 @@ export const normalizeMlbStatsApiGame = (
 
   const awayAbbreviation = away.data.team.abbreviation.toLowerCase();
   const homeAbbreviation = home.data.team.abbreviation.toLowerCase();
-  const gameDate = raw.gameDate.slice(0, 10);
+  // Use officialDate (Eastern/local calendar date) for the game_id so that
+  // late West Coast games crossing the UTC midnight boundary are keyed on the
+  // same date that MLB, DraftKings, and Rotowire use.  scheduled_start still
+  // carries the precise UTC timestamp from gameDate.
+  const gameIdDate = raw.officialDate;
   const rawPayloadRef = context?.raw_payload_ref ?? `raw-mlb-${raw.gamePk}`;
   const resolvedContext = {
     ...createDefaultNormalizationContext(rawPayloadRef),
@@ -398,7 +402,7 @@ export const normalizeMlbStatsApiGame = (
   };
 
   return ok({
-    game_id: asGameId(`mlb-${gameDate}-${awayAbbreviation}-${homeAbbreviation}`),
+    game_id: asGameId(`mlb-${gameIdDate}-${awayAbbreviation}-${homeAbbreviation}`),
     sport_id: SPORT_ID,
     scheduled_start: asISOTimestamp(raw.gameDate),
     status: mapStatus(raw.status.codedGameState, raw.status.detailedState),

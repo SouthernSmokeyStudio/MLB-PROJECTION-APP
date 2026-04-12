@@ -1,4 +1,4 @@
-import type { CanonicalGame, CanonicalVenue } from "@lib/contracts/canonical";
+import type { CanonicalGame, CanonicalVenue, ProbablePitcher } from "@lib/contracts/canonical";
 import type {
   PreparedBatterInputs,
   PreparedGameInputs,
@@ -246,6 +246,37 @@ const createPreparedGame = (
   };
 };
 
+/**
+ * Returns true when starter and canonical refer to the same pitcher.
+ *
+ * The primary comparison is player_id equality (both numeric or both slug).
+ * When a non-official merge tier produced a slug player_id for the canonical
+ * probable pitcher while the boxscore produced a numeric player_id for the
+ * starter, direct string equality fails even for the same player.  The two
+ * secondary checks bridge that gap without false positives:
+ *   1. canonical.mlb_stats_api_id matches starter.player_id (numeric starter
+ *      vs slug canonical — canonical numeric id was back-filled from boxscore)
+ *   2. both sides carry a non-null mlb_stats_api_id that agrees
+ *
+ * Do NOT add a check that assumes identity when mlb_stats_api_id is null on
+ * either side — that would silently swallow true pitcher mismatches.
+ */
+const pitcherIdentityMatches = (
+  starter: PreparedPitcherInputs,
+  canonical: ProbablePitcher
+): boolean => {
+  if (starter.player_id === canonical.player_id) return true;
+  if (canonical.mlb_stats_api_id !== null && starter.player_id === canonical.mlb_stats_api_id)
+    return true;
+  if (
+    starter.mlb_stats_api_id !== null &&
+    canonical.mlb_stats_api_id !== null &&
+    starter.mlb_stats_api_id === canonical.mlb_stats_api_id
+  )
+    return true;
+  return false;
+};
+
 export const prepareGameInputs = (
   game: CanonicalGame,
   data?: Partial<GamePreparationData>
@@ -294,7 +325,7 @@ export const prepareGameInputs = (
   if (
     awayStarter &&
     game.away.probable_pitcher &&
-    awayStarter.player_id !== game.away.probable_pitcher.player_id
+    !pitcherIdentityMatches(awayStarter, game.away.probable_pitcher)
   ) {
     reasons.push("away_starter player_id does not match canonical probable pitcher");
   }
@@ -302,7 +333,7 @@ export const prepareGameInputs = (
   if (
     homeStarter &&
     game.home.probable_pitcher &&
-    homeStarter.player_id !== game.home.probable_pitcher.player_id
+    !pitcherIdentityMatches(homeStarter, game.home.probable_pitcher)
   ) {
     reasons.push("home_starter player_id does not match canonical probable pitcher");
   }

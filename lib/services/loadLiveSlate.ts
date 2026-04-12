@@ -523,6 +523,49 @@ const buildPlayerIdentityMap = (
   return identityMap;
 };
 
+const patchCanonicalTeamProbablePitcherFromActualStarter = (
+  teamContext: CanonicalGame["away"],
+  actualStarter: PreparedGameInputs["away_starter"]
+): CanonicalGame["away"] => {
+  if (actualStarter === null) {
+    return teamContext;
+  }
+
+  return {
+    ...teamContext,
+    probable_pitcher: {
+      player_id: actualStarter.player_id,
+      mlb_stats_api_id: actualStarter.mlb_stats_api_id,
+      starting_status: "confirmed",
+      handedness: actualStarter.handedness
+    }
+  };
+};
+
+const applyRuntimeActualStarterPatch = (
+  canonicalGame: CanonicalGame,
+  extractedData: Pick<GamePreparationData, "away_starter" | "home_starter">
+): CanonicalGame => {
+  const away = patchCanonicalTeamProbablePitcherFromActualStarter(
+    canonicalGame.away,
+    extractedData.away_starter
+  );
+  const home = patchCanonicalTeamProbablePitcherFromActualStarter(
+    canonicalGame.home,
+    extractedData.home_starter
+  );
+
+  if (away === canonicalGame.away && home === canonicalGame.home) {
+    return canonicalGame;
+  }
+
+  return {
+    ...canonicalGame,
+    away,
+    home
+  };
+};
+
 const readBoxscoreTeamRuns = (
   boxscore: unknown,
   side: "away" | "home"
@@ -818,7 +861,66 @@ export const loadLiveSlate = async (
             : {})
         };
 
-        preparedGame = prepareGameInputs(mergedCanonical, enrichedData);
+        // Back-fill mlb_stats_api_id on the merged canonical probable pitchers
+        // when a non-official tier won and left the field null (slug-only ID
+        // from Rotowire/inferred source).  findBoxscorePlayerNumericId resolves
+        // the slug → numeric mapping via slugifyPlayerName(fullName) so the
+        // reconciliation check in prepareGameInputs can compare on a shared key.
+        // This is read-only enrichment — it does not change the winning tier or
+        // the player_id; it only fills a missing numeric cross-reference.
+        let reconcileCanonical = applyRuntimeActualStarterPatch(mergedCanonical, extracted.data);
+        const awayNeedsNumericId =
+          mergedCanonical.away.probable_pitcher !== null &&
+          reconcileCanonical.away.probable_pitcher !== null &&
+          reconcileCanonical.away.probable_pitcher.mlb_stats_api_id === null;
+        const homeNeedsNumericId =
+          mergedCanonical.home.probable_pitcher !== null &&
+          reconcileCanonical.home.probable_pitcher !== null &&
+          reconcileCanonical.home.probable_pitcher.mlb_stats_api_id === null;
+        if (awayNeedsNumericId || homeNeedsNumericId) {
+          const awayNumericId = awayNeedsNumericId
+            ? findBoxscorePlayerNumericId(
+                fetchedBoxscore.data,
+                "away",
+                reconcileCanonical.away.probable_pitcher!.player_id
+              )
+            : null;
+          const homeNumericId = homeNeedsNumericId
+            ? findBoxscorePlayerNumericId(
+                fetchedBoxscore.data,
+                "home",
+                reconcileCanonical.home.probable_pitcher!.player_id
+              )
+            : null;
+          if (awayNumericId !== null || homeNumericId !== null) {
+            const patchedAway =
+              awayNumericId !== null && reconcileCanonical.away.probable_pitcher !== null
+                ? {
+                    ...reconcileCanonical.away,
+                    probable_pitcher: {
+                      ...reconcileCanonical.away.probable_pitcher,
+                      mlb_stats_api_id: String(awayNumericId)
+                    }
+                  }
+                : reconcileCanonical.away;
+            const patchedHome =
+              homeNumericId !== null && reconcileCanonical.home.probable_pitcher !== null
+                ? {
+                    ...reconcileCanonical.home,
+                    probable_pitcher: {
+                      ...reconcileCanonical.home.probable_pitcher,
+                      mlb_stats_api_id: String(homeNumericId)
+                    }
+                  }
+                : reconcileCanonical.home;
+            reconcileCanonical = {
+              ...reconcileCanonical,
+              away: patchedAway,
+              home: patchedHome
+            };
+          }
+        }
+        preparedGame = prepareGameInputs(reconcileCanonical, enrichedData);
         boxscoreEnriched++;
       }
     }

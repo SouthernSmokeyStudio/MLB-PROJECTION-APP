@@ -14,6 +14,7 @@ import { checkProjectionReconciliation } from "./checkProjectionReconciliation";
 import type { IndexedCrosswalk } from "@lib/crosswalk/resolvePlayerIdentity";
 import { resolvePlayerIdentity } from "@lib/crosswalk/resolvePlayerIdentity";
 import { parseCanonicalPlayerId } from "@lib/contracts/player-crosswalk";
+import type { LoadedDraftKingsClassicSlateItem } from "./loadDraftKingsClassicSlate";
 
 export interface DraftKingsClassicPlayerCard extends PlayerCard {
   readonly draftkings_classic: DraftKingsClassicJoinState;
@@ -31,7 +32,10 @@ export type DraftKingsClassicSalaryJoinIdentities = Readonly<
 export interface JoinDraftKingsClassicSalariesInput {
   readonly game: GameCard;
   readonly players: readonly PlayerCard[];
-  readonly salary_slate: DraftKingsClassicSalarySlate;
+  /** Multi-slate inventory. Takes precedence over salary_slate when provided. */
+  readonly salary_slates?: readonly LoadedDraftKingsClassicSlateItem[];
+  /** Single-slate backward-compat. Used only when salary_slates is absent. */
+  readonly salary_slate?: DraftKingsClassicSalarySlate;
   /** When provided, salary join uses crosswalk-driven resolution instead of legacy fallback. */
   readonly crosswalk?: IndexedCrosswalk;
   readonly salaryJoinIdentities?: DraftKingsClassicSalaryJoinIdentities;
@@ -136,7 +140,7 @@ const toHeldPlayer = (
 const matchSalaryViaCrosswalk = (
   player: PlayerCard,
   crosswalk: IndexedCrosswalk,
-  salaryByDkPlayerId: ReadonlyMap<string, DraftKingsClassicSalarySlate["salaries"][number]>
+  salaryByPlayerId: ReadonlyMap<string, DraftKingsClassicSalarySlate["salaries"][number]>
 ): DraftKingsClassicSalarySlate["salaries"][number] | null => {
   const resolution = resolvePlayerIdentity(crosswalk, {
     mlb_stats_api_id: player.mlb_stats_api_id,
@@ -163,7 +167,7 @@ const matchSalaryViaCrosswalk = (
     return null;
   }
 
-  const salaryEntry = salaryByDkPlayerId.get(crosswalkEntry.dk_player_id);
+  const salaryEntry = salaryByPlayerId.get(crosswalkEntry.dk_player_id);
   return salaryEntry ?? null;
 };
 
@@ -195,23 +199,40 @@ const matchSalaryByNameAndTeam = (
 export const joinDraftKingsClassicSalaries = ({
   game,
   players,
-  salary_slate,
+  salary_slates: inputSlates,
+  salary_slate: inputSingleSlate,
   crosswalk,
   salaryJoinIdentities
 }: JoinDraftKingsClassicSalariesInput): DraftKingsClassicPlayerCardsResult => {
   const reconciliation = checkProjectionReconciliation({ game, players });
-  const draftGroupId = salary_slate.draft_group_id;
+
+  // Normalize: prefer explicit multi-slate input; fall back to wrapping the single-slate
+  const salarySlates: readonly LoadedDraftKingsClassicSlateItem[] =
+    inputSlates ??
+    (inputSingleSlate
+      ? [{
+          draft_group_id: inputSingleSlate.draft_group_id,
+          label: "DraftKings Classic",
+          min_start_time: "",
+          max_start_time: "",
+          salary_slate: inputSingleSlate
+        }]
+      : []);
+
+  // Use the first slate's draft_group_id as the default for held players
+  const defaultDraftGroupId =
+    salarySlates.length > 0 && salarySlates[0] ? salarySlates[0].draft_group_id : "unknown";
 
   if (!reconciliation.passed) {
     const blockedReason =
       reconciliation.failures[0] ??
       "Projection chain failed reconciliation before DraftKings Classic salary join";
     const heldPlayers = players.map((player) =>
-      toHeldPlayer(player, draftGroupId, blockedReason)
+      toHeldPlayer(player, defaultDraftGroupId, blockedReason)
     );
 
     return {
-      draft_group_id: draftGroupId,
+      draft_group_id: defaultDraftGroupId,
       blocked: {
         is_blocked: true,
         blocked_reason: blockedReason
@@ -222,39 +243,52 @@ export const joinDraftKingsClassicSalaries = ({
     };
   }
 
-  // Build salary index keyed by DK player_id (used by both crosswalk and legacy paths)
-  const salaryByPlayerId = new Map(
-    salary_slate.salaries.map((salaryEntry) => [String(salaryEntry.player_id), salaryEntry] as const)
-  );
+  // Build per-slate indices: player_id lookup + normalized name+team lookup
+  interface SlateIndex {
+    readonly item: LoadedDraftKingsClassicSlateItem;
+    readonly salaryByPlayerId: ReadonlyMap<string, DraftKingsClassicSalarySlate["salaries"][number]>;
+    readonly salaryByNormalizedNameAndTeam: ReadonlyMap<
+      string,
+      DraftKingsClassicSalarySlate["salaries"][number] | null
+    >;
+  }
 
   const AMBIGUOUS_SENTINEL = null;
-  const salaryByNormalizedNameAndTeam = (() => {
-    const map = new Map<string, typeof salary_slate.salaries[number] | null>();
+  const slateIndices: SlateIndex[] = salarySlates.map((slateItem) => {
+    const slate = slateItem.salary_slate;
 
-    for (const entry of salary_slate.salaries) {
-      const key = buildNameTeamKey(entry.display_name, entry.team_abbreviation);
-      if (key === null) {
-        continue;
-      }
+    const salaryByPlayerId = new Map(
+      slate.salaries.map(
+        (entry) => [String(entry.player_id), entry] as const
+      )
+    );
 
-      if (map.has(key)) {
-        const existing = map.get(key);
-        // Same player_id = same player listed twice (e.g. multi-slot DK draftables).
-        // Keep the existing entry. Only sentinel when player_id differs (true ambiguity).
-        if (existing !== AMBIGUOUS_SENTINEL && existing?.player_id !== entry.player_id) {
-          map.set(key, AMBIGUOUS_SENTINEL);
+    const salaryByNormalizedNameAndTeam = (() => {
+      const map = new Map<string, typeof slate.salaries[number] | null>();
+      for (const entry of slate.salaries) {
+        const key = buildNameTeamKey(entry.display_name, entry.team_abbreviation);
+        if (key === null) continue;
+        if (map.has(key)) {
+          const existing = map.get(key);
+          // Same player_id = same player listed twice (e.g. multi-slot DK draftables).
+          // Keep the existing entry. Only sentinel when player_id differs (true ambiguity).
+          if (existing !== AMBIGUOUS_SENTINEL && existing?.player_id !== entry.player_id) {
+            map.set(key, AMBIGUOUS_SENTINEL);
+          }
+        } else {
+          map.set(key, entry);
         }
-      } else {
-        map.set(key, entry);
       }
-    }
+      return map;
+    })();
 
-    return map;
-  })();
+    return { item: slateItem, salaryByPlayerId, salaryByNormalizedNameAndTeam };
+  });
 
   const toReadyPlayer = (
     player: PlayerCard,
-    salary: typeof salary_slate.salaries[number]
+    salary: DraftKingsClassicSalarySlate["salaries"][number],
+    draftGroupId: string
   ): DraftKingsClassicPlayerCard => ({
     ...player,
     fantasy_summary: {
@@ -268,24 +302,47 @@ export const joinDraftKingsClassicSalaries = ({
     draftkings_classic: buildReadyJoinState(draftGroupId, salary.draftable_id)
   });
 
+  /**
+   * Try to find a salary match for a player across ALL slates.
+   * Legacy path (no crosswalk): tries mlb_stats_api_id/player_id lookup first,
+   * then name+team fallback per slate.
+   */
+  const findSalaryInSlates = (
+    player: PlayerCard
+  ): { salary: DraftKingsClassicSalarySlate["salaries"][number]; draftGroupId: string } | null => {
+    for (const idx of slateIndices) {
+      // Primary: player_id lookup (DK salary entries use numeric MLB Stats API IDs)
+      const salaryJoinKey = player.mlb_stats_api_id ?? player.player_id;
+      const byId = idx.salaryByPlayerId.get(salaryJoinKey);
+      if (byId) {
+        return { salary: byId, draftGroupId: idx.item.draft_group_id };
+      }
+    }
+
+    // Secondary: name+team fallback across all slates
+    for (const idx of slateIndices) {
+      const byName = matchSalaryByNameAndTeam(
+        player,
+        salaryJoinIdentities,
+        idx.salaryByNormalizedNameAndTeam
+      );
+      if (byName) {
+        return { salary: byName, draftGroupId: idx.item.draft_group_id };
+      }
+    }
+
+    return null;
+  };
+
   const buildMissingSalaryPlayer = (
     player: PlayerCard,
     crosswalkMissReason: "unresolved" | "no_dk_link" | null
   ): DraftKingsClassicPlayerCard => {
-    const fallbackSalary = matchSalaryByNameAndTeam(
-      player,
-      salaryJoinIdentities,
-      salaryByNormalizedNameAndTeam
-    );
-
-    if (fallbackSalary) {
-      return toReadyPlayer(player, fallbackSalary);
-    }
-
+    // Crosswalk-specific hold reasons are fail-closed: do NOT fall through to name+team.
     if (crosswalkMissReason === "unresolved") {
       return toHeldPlayer(
         player,
-        draftGroupId,
+        defaultDraftGroupId,
         "Crosswalk: player identity unresolved — cannot match DraftKings salary"
       );
     }
@@ -293,14 +350,26 @@ export const joinDraftKingsClassicSalaries = ({
     if (crosswalkMissReason === "no_dk_link") {
       return toHeldPlayer(
         player,
-        draftGroupId,
+        defaultDraftGroupId,
         "Crosswalk: player resolved but no dk_player_id link — cannot match DraftKings salary"
       );
     }
 
+    // Legacy path only: try name+team fallback across all slates
+    for (const idx of slateIndices) {
+      const fallback = matchSalaryByNameAndTeam(
+        player,
+        salaryJoinIdentities,
+        idx.salaryByNormalizedNameAndTeam
+      );
+      if (fallback) {
+        return toReadyPlayer(player, fallback, idx.item.draft_group_id);
+      }
+    }
+
     return toHeldPlayer(
       player,
-      draftGroupId,
+      defaultDraftGroupId,
       "DraftKings Classic salary missing for reconciled player row"
     );
   };
@@ -309,7 +378,7 @@ export const joinDraftKingsClassicSalaries = ({
     if (player.blocked.is_blocked) {
       return toHeldPlayer(
         player,
-        draftGroupId,
+        defaultDraftGroupId,
         player.blocked.blocked_reason ?? "Upstream player projection is blocked"
       );
     }
@@ -317,40 +386,42 @@ export const joinDraftKingsClassicSalaries = ({
     if (!player.fantasy_summary) {
       return toHeldPlayer(
         player,
-        draftGroupId,
+        defaultDraftGroupId,
         "DraftKings Classic salary join requires a fantasy projection"
       );
     }
 
-    let matchedSalary: typeof salary_slate.salaries[number] | null | undefined;
-
     if (crosswalk) {
       // Crosswalk-driven path: resolve identity → use dk_player_id → match salary
-      matchedSalary = matchSalaryViaCrosswalk(player, crosswalk, salaryByPlayerId);
-
-      if (!matchedSalary) {
-        const resolution = resolvePlayerIdentity(crosswalk, {
-          mlb_stats_api_id: player.mlb_stats_api_id,
-          player_id: player.player_id,
-          team_abbreviation: player.team_id.toUpperCase()
-        });
-
-        return buildMissingSalaryPlayer(
-          player,
-          resolution.canonical_player_id === null ? "unresolved" : "no_dk_link"
-        );
+      // Search across all slates for a salary match via crosswalk.
+      for (const idx of slateIndices) {
+        const matched = matchSalaryViaCrosswalk(player, crosswalk, idx.salaryByPlayerId);
+        if (matched) {
+          return toReadyPlayer(player, matched, idx.item.draft_group_id);
+        }
       }
+
+      // Not found in any slate via crosswalk — determine miss reason
+      const resolution = resolvePlayerIdentity(crosswalk, {
+        mlb_stats_api_id: player.mlb_stats_api_id,
+        player_id: player.player_id,
+        team_abbreviation: player.team_id.toUpperCase()
+      });
+
+      return buildMissingSalaryPlayer(
+        player,
+        resolution.canonical_player_id === null ? "unresolved" : "no_dk_link"
+      );
     } else {
-      // Legacy path: mlb_stats_api_id / player_id primary match + name fallback
-      const salaryJoinKey = player.mlb_stats_api_id ?? player.player_id;
-      matchedSalary = salaryByPlayerId.get(salaryJoinKey);
-
-      if (!matchedSalary) {
-        return buildMissingSalaryPlayer(player, null);
+      // Legacy path: mlb_stats_api_id / player_id primary match across all slates,
+      // then name+team fallback across all slates
+      const matched = findSalaryInSlates(player);
+      if (matched) {
+        return toReadyPlayer(player, matched.salary, matched.draftGroupId);
       }
-    }
 
-    return toReadyPlayer(player, matchedSalary);
+      return buildMissingSalaryPlayer(player, null);
+    }
   });
 
   const heldPlayers = joinedPlayers.filter(
@@ -358,7 +429,7 @@ export const joinDraftKingsClassicSalaries = ({
   ).length;
 
   return {
-    draft_group_id: draftGroupId,
+    draft_group_id: defaultDraftGroupId,
     blocked: {
       is_blocked: false,
       blocked_reason: null
@@ -371,17 +442,29 @@ export const joinDraftKingsClassicSalaries = ({
 
 export const buildDraftKingsClassicPlayerCards = (
   preparedInputs: PreparedGameInputs,
-  salarySlate: DraftKingsClassicSalarySlate,
+  salaryInput: DraftKingsClassicSalarySlate | readonly LoadedDraftKingsClassicSlateItem[],
   options: BuildPlayerCardOptions & {
     readonly salaryJoinIdentities?: DraftKingsClassicSalaryJoinIdentities;
   } = {}
-): DraftKingsClassicPlayerCardsResult =>
-  joinDraftKingsClassicSalaries({
+): DraftKingsClassicPlayerCardsResult => {
+  const isSlateArray = Array.isArray(salaryInput);
+  const salary_slates: readonly LoadedDraftKingsClassicSlateItem[] = isSlateArray
+    ? (salaryInput as readonly LoadedDraftKingsClassicSlateItem[])
+    : [{
+        draft_group_id: (salaryInput as DraftKingsClassicSalarySlate).draft_group_id,
+        label: "DraftKings Classic",
+        min_start_time: "",
+        max_start_time: "",
+        salary_slate: salaryInput as DraftKingsClassicSalarySlate
+      }];
+
+  return joinDraftKingsClassicSalaries({
     game: buildGameCard(preparedInputs),
     players: buildPlayerCards(preparedInputs, options).players,
-    salary_slate: salarySlate,
+    salary_slates,
     ...(options.crosswalk ? { crosswalk: options.crosswalk } : {}),
     ...(options.salaryJoinIdentities
       ? { salaryJoinIdentities: options.salaryJoinIdentities }
       : {})
   });
+};

@@ -113,8 +113,7 @@ export async function GET(request: NextRequest): Promise<Response> {
           }
         : {}),
       ...(!loadedDraftKingsSlate.success ||
-      !loadedDraftKingsSlate.data.draft_group ||
-      !loadedDraftKingsSlate.data.salary_slate ||
+      loadedDraftKingsSlate.data.slates.length === 0 ||
       mlbError
         ? {
             dfs_edge_reason: mlbError
@@ -127,13 +126,13 @@ export async function GET(request: NextRequest): Promise<Response> {
               source: DFS_EDGE_SOURCE,
               note: loadedDraftKingsSlate.data.note ?? liveNote,
               draftkings_classic: {
-                draft_group_id: loadedDraftKingsSlate.data.draft_group.draft_group_id,
-                label: loadedDraftKingsSlate.data.label ?? "DraftKings Classic",
-                min_start_time: loadedDraftKingsSlate.data.draft_group.min_start_time,
-                max_start_time: loadedDraftKingsSlate.data.draft_group.max_start_time,
-                tags: loadedDraftKingsSlate.data.draft_group.all_tags
+                draft_group_id: loadedDraftKingsSlate.data.slates[0]!.draft_group_id,
+                label: loadedDraftKingsSlate.data.slates[0]!.label,
+                min_start_time: loadedDraftKingsSlate.data.slates[0]!.min_start_time,
+                max_start_time: loadedDraftKingsSlate.data.slates[0]!.max_start_time,
+                tags: []
               },
-              salary_slate: loadedDraftKingsSlate.data.salary_slate
+              salary_slate_inventory: loadedDraftKingsSlate.data.slates
             }
           }),
       ...(!loadedMoneylineSlate.success || !loadedMoneylineSlate.data.moneyline_slate || mlbError
