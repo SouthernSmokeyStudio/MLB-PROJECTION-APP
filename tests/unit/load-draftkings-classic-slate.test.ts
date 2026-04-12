@@ -99,20 +99,26 @@ describe("loadDraftKingsClassicSlate persistence fallback", () => {
     expect(loaded.success).toBe(true);
     if (!loaded.success) throw new Error(loaded.error);
     expect(loaded.data.source).toBe("draftkings-classic-live");
-    expect(loaded.data.draft_group?.draft_group_id).toBe("145340");
-    expect(loaded.data.salary_slate?.draft_group_id).toBe("145340");
+    expect(loaded.data.slates).toHaveLength(1);
+    expect(loaded.data.slates[0]?.draft_group_id).toBe("145340");
+    expect(loaded.data.slates[0]?.salary_slate.draft_group_id).toBe("145340");
     expect(fetchDraftKingsClassicSalarySlate).toHaveBeenCalledWith("145340");
 
     const persistedRaw = await readFile(join(artifactDir, "2026-04-10.json"), "utf-8");
     const persisted = JSON.parse(persistedRaw) as {
+      readonly version?: number;
       readonly date?: string;
-      readonly draft_group?: { readonly draft_group_id?: string };
-      readonly salary_slate?: { readonly draft_group_id?: string };
+      readonly slates?: ReadonlyArray<{
+        readonly draft_group?: { readonly draft_group_id?: string };
+        readonly salary_slate?: { readonly draft_group_id?: string };
+      }>;
     };
 
+    expect(persisted.version).toBe(2);
     expect(persisted.date).toBe("2026-04-10");
-    expect(persisted.draft_group?.draft_group_id).toBe("145340");
-    expect(persisted.salary_slate?.draft_group_id).toBe("145340");
+    expect(persisted.slates).toHaveLength(1);
+    expect(persisted.slates?.[0]?.draft_group?.draft_group_id).toBe("145340");
+    expect(persisted.slates?.[0]?.salary_slate?.draft_group_id).toBe("145340");
   });
 
   it("uses live upcoming instead of stale persisted data when both exist for the requested date", async () => {
@@ -148,18 +154,23 @@ describe("loadDraftKingsClassicSlate persistence fallback", () => {
     expect(loaded.success).toBe(true);
     if (!loaded.success) throw new Error(loaded.error);
     expect(loaded.data.source).toBe("draftkings-classic-live");
-    expect(loaded.data.draft_group?.draft_group_id).toBe("145999");
-    expect(loaded.data.salary_slate?.draft_group_id).toBe("145999");
+    expect(loaded.data.slates).toHaveLength(1);
+    expect(loaded.data.slates[0]?.draft_group_id).toBe("145999");
+    expect(loaded.data.slates[0]?.salary_slate.draft_group_id).toBe("145999");
     expect(fetchUpcomingDraftKingsClassicDraftGroups).toHaveBeenCalledTimes(2);
     expect(fetchDraftKingsClassicSalarySlate).toHaveBeenCalledTimes(2);
 
     const persistedRaw = await readFile(join(artifactDir, "2026-04-10.json"), "utf-8");
     const persisted = JSON.parse(persistedRaw) as {
-      readonly draft_group?: { readonly draft_group_id?: string };
-      readonly salary_slate?: { readonly draft_group_id?: string };
+      readonly version?: number;
+      readonly slates?: ReadonlyArray<{
+        readonly draft_group?: { readonly draft_group_id?: string };
+        readonly salary_slate?: { readonly draft_group_id?: string };
+      }>;
     };
-    expect(persisted.draft_group?.draft_group_id).toBe("145999");
-    expect(persisted.salary_slate?.draft_group_id).toBe("145999");
+    expect(persisted.version).toBe(2);
+    expect(persisted.slates?.[0]?.draft_group?.draft_group_id).toBe("145999");
+    expect(persisted.slates?.[0]?.salary_slate?.draft_group_id).toBe("145999");
   });
 
   it("uses the persisted date-keyed slate after the upcoming source rotates away", async () => {
@@ -202,8 +213,9 @@ describe("loadDraftKingsClassicSlate persistence fallback", () => {
     expect(loaded.success).toBe(true);
     if (!loaded.success) throw new Error(loaded.error);
     expect(loaded.data.source).toBe("draftkings-classic-persisted");
-    expect(loaded.data.draft_group?.draft_group_id).toBe("145340");
-    expect(loaded.data.salary_slate?.draft_group_id).toBe("145340");
+    expect(loaded.data.slates).toHaveLength(1);
+    expect(loaded.data.slates[0]?.draft_group_id).toBe("145340");
+    expect(loaded.data.slates[0]?.salary_slate.draft_group_id).toBe("145340");
     expect(fetchUpcomingDraftKingsClassicDraftGroups).toHaveBeenCalledTimes(2);
     expect(fetchDraftKingsClassicSalarySlate).toHaveBeenCalledTimes(1);
   });
@@ -228,8 +240,7 @@ describe("loadDraftKingsClassicSlate persistence fallback", () => {
 
     expect(loaded.success).toBe(true);
     if (!loaded.success) throw new Error(loaded.error);
-    expect(loaded.data.draft_group).toBeNull();
-    expect(loaded.data.salary_slate).toBeNull();
+    expect(loaded.data.slates).toHaveLength(0);
     expect(loaded.data.note).toContain(
       "No DraftKings Classic salary slate matched the requested date."
     );

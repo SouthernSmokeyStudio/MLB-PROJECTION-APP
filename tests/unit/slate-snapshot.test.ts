@@ -112,6 +112,20 @@ const makeSalarySlate = (): DraftKingsClassicSalarySlate => ({
       competition_id: "822758",
       competition_name: "NYY @ BOS",
       competition_start: asISOTimestamp("2026-03-27T19:05:00Z")
+    },
+    {
+      draftable_id: "42539999",
+      player_id: "bos-1" as never,
+      player_dk_id: "dk-jarren-duran",
+      display_name: "Jarren Duran",
+      short_name: "J. Duran",
+      position: "OF",
+      roster_slot_id: 8,
+      salary: 4800,
+      team_abbreviation: "BOS",
+      competition_id: "822758",
+      competition_name: "NYY @ BOS",
+      competition_start: asISOTimestamp("2026-03-27T19:05:00Z")
     }
   ]
 });

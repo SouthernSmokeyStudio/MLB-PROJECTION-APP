@@ -222,13 +222,19 @@ describe("/api/slate-snapshot route", () => {
         source: "draftkings-classic-live",
         date: "2026-03-27",
         generated_at: "2026-03-27T15:35:00Z",
-        draft_group: DRAFT_GROUP,
-        label: "Featured DraftKings Classic",
-        salary_slate: makeSalarySlate(
-          playerCards
-            .filter((player) => player.player_id !== omittedPlayerId)
-            .map((player) => player.player_id)
-        ),
+        slates: [
+          {
+            draft_group_id: DRAFT_GROUP.draft_group_id,
+            label: "Featured DraftKings Classic",
+            min_start_time: DRAFT_GROUP.min_start_time,
+            max_start_time: DRAFT_GROUP.max_start_time,
+            salary_slate: makeSalarySlate(
+              playerCards
+                .filter((player) => player.player_id !== omittedPlayerId)
+                .map((player) => player.player_id)
+            )
+          }
+        ],
         note: null
       }
     });
@@ -310,9 +316,7 @@ describe("/api/slate-snapshot route", () => {
         source: "draftkings-classic-live",
         date: "2026-03-27",
         generated_at: "2026-03-27T15:35:00Z",
-        draft_group: null,
-        label: null,
-        salary_slate: null,
+        slates: [],
         note: "No DraftKings Classic salary slate matched the requested date."
       }
     });
@@ -360,9 +364,7 @@ describe("/api/slate-snapshot route", () => {
         source: "draftkings-classic-live",
         date: "2026-03-27",
         generated_at: "2026-03-27T15:35:00Z",
-        draft_group: null,
-        label: null,
-        salary_slate: null,
+        slates: [],
         note: "No DraftKings Classic salary slate matched the requested date."
       }
     });
@@ -498,9 +500,7 @@ describe("/api/slate-snapshot route", () => {
         source: "draftkings-classic-live",
         date: "2026-03-27",
         generated_at: "2026-03-27T15:35:00Z",
-        draft_group: null,
-        label: null,
-        salary_slate: null,
+        slates: [],
         note: "No DraftKings Classic salary slate matched the requested date."
       }
     });
@@ -604,9 +604,7 @@ describe("/api/slate-snapshot route", () => {
         source: "draftkings-classic-live",
         date: "2026-03-27",
         generated_at: "2026-03-27T15:35:00Z",
-        draft_group: null,
-        label: null,
-        salary_slate: null,
+        slates: [],
         note: "No DraftKings Classic salary slate matched the requested date."
       }
     });
