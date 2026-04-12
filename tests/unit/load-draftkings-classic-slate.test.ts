@@ -238,11 +238,10 @@ describe("loadDraftKingsClassicSlate persistence fallback", () => {
       artifactDir
     });
 
-    expect(loaded.success).toBe(true);
-    if (!loaded.success) throw new Error(loaded.error);
-    expect(loaded.data.slates).toHaveLength(0);
-    expect(loaded.data.note).toContain(
-      "No DraftKings Classic salary slate matched the requested date."
+    expect(loaded.success).toBe(false);
+    if (loaded.success) throw new Error("expected uncaptured past-date failure");
+    expect(loaded.error).toBe(
+      `DraftKings Classic upcoming capture no longer includes 2026-04-10; replay requires a previously captured artifact at ${join(artifactDir, "2026-04-10.json")}.`
     );
     expect(fetchDraftKingsClassicSalarySlate).not.toHaveBeenCalled();
   });

@@ -48,7 +48,7 @@ interface PersistedDraftKingsClassicSlateEntry {
 }
 
 /**
- * Version 2 — multi-slate artifact.  All same-date Classic slates are stored
+ * Version 2 Ã¢â‚¬â€ multi-slate artifact.  All same-date Classic slates are stored
  * in a `slates` array so that the fallback path can reconstruct the full
  * same-date inventory when the live upstream has rotated away.
  *
@@ -123,7 +123,7 @@ const parsePersistedDraftKingsClassicSlate = (
     return err("DraftKings Classic artifact has unsupported source");
   }
 
-  // ── Version 1 (single-slate, backward compat) ──────────────────────────
+  // Ã¢â€â‚¬Ã¢â€â‚¬ Version 1 (single-slate, backward compat) Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
   if (parsed.version === 1) {
     if (!isDraftGroup(parsed.draft_group)) {
       return err("DraftKings Classic artifact (v1) has invalid draft_group");
@@ -150,7 +150,7 @@ const parsePersistedDraftKingsClassicSlate = (
     ]);
   }
 
-  // ── Version 2 (multi-slate array) ──────────────────────────────────────
+  // Ã¢â€â‚¬Ã¢â€â‚¬ Version 2 (multi-slate array) Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
   if (parsed.version !== PERSISTED_DK_CLASSIC_VERSION) {
     return err(`Unsupported DraftKings Classic artifact version: ${String(parsed.version)}`);
   }
@@ -244,7 +244,7 @@ const persistDraftKingsClassicSlate = async ({
 }: {
   readonly date: string;
   readonly artifactDir: string;
-  /** All successfully fetched same-date slates — the full inventory is persisted
+  /** All successfully fetched same-date slates Ã¢â‚¬â€ the full inventory is persisted
    *  so the fallback path can reconstruct a complete salary_slate_inventory. */
   readonly slates: ReadonlyArray<{
     readonly draftGroup: DraftKingsClassicDraftGroup;
@@ -324,6 +324,27 @@ const selectDraftKingsClassicGroups = ({
     });
 };
 
+
+const upcomingDiscoveryHasRotatedPastDate = ({
+  date,
+  groups
+}: {
+  readonly date: string;
+  readonly groups: readonly DraftKingsClassicDraftGroup[];
+}): boolean =>
+  groups.some(
+    (group) => isDraftKingsClassicGroup(group) && group.min_start_time.slice(0, 10) > date
+  );
+
+const buildUncapturedPastDateMessage = ({
+  date,
+  artifactDir
+}: {
+  readonly date: string;
+  readonly artifactDir: string;
+}): string =>
+  `DraftKings Classic upcoming capture no longer includes ${date}; replay requires a previously captured artifact at ${getArtifactPath(date, artifactDir)}.`;
+
 export const backfillDraftKingsClassicSlate = async ({
   date,
   artifactDir = DEFAULT_ARTIFACT_DIR
@@ -348,7 +369,11 @@ export const backfillDraftKingsClassicSlate = async ({
   });
 
   if (selectedGroups.length === 0) {
-    return err("No DraftKings Classic salary slate matched the requested date.");
+    return err(
+      upcomingDiscoveryHasRotatedPastDate({ date, groups: fetchedGroups.data })
+        ? buildUncapturedPastDateMessage({ date, artifactDir })
+        : "No DraftKings Classic salary slate matched the requested date."
+    );
   }
 
   const fetchedSlates = await Promise.all(
@@ -459,6 +484,10 @@ export const loadDraftKingsClassicSlate = async ({
 
     const persistedNote = persisted.success ? null : persisted.error;
 
+    if (upcomingDiscoveryHasRotatedPastDate({ date, groups: fetchedGroups.data })) {
+      return err(buildUncapturedPastDateMessage({ date, artifactDir }));
+    }
+
     return ok({
       source: "draftkings-classic-live",
       date,
@@ -476,13 +505,14 @@ export const loadDraftKingsClassicSlate = async ({
   }
 
   // Fetch all selected groups in parallel
+  // Fetch all selected groups in parallel
   const fetchedSlates = await Promise.all(
     selectedGroups.map((group) => fetchDraftKingsClassicSalarySlate(group.draft_group_id))
   );
 
   const slates: LoadedDraftKingsClassicSlateItem[] = [];
   /** Parallel array carrying the full DraftGroup for each successfully fetched
-   *  slate — needed to persist group metadata alongside the salary data. */
+   *  slate Ã¢â‚¬â€ needed to persist group metadata alongside the salary data. */
   const persistEntries: Array<{
     readonly draftGroup: DraftKingsClassicDraftGroup;
     readonly label: string;

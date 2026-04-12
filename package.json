@@ -10,7 +10,8 @@
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "materialize": "tsx scripts/materialize.ts"
+    "materialize": "tsx scripts/materialize.ts",
+    "backfill:dk-classic": "tsx scripts/backfillDraftKingsClassicSlate.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "2.101.1",

@@ -142,7 +142,9 @@ describe("backfillDraftKingsClassicSlate", () => {
 
     expect(result.success).toBe(false);
     if (result.success) throw new Error("expected backfill failure");
-    expect(result.error).toBe("No DraftKings Classic salary slate matched the requested date.");
+    expect(result.error).toBe(
+      `DraftKings Classic upcoming capture no longer includes 2026-04-10; replay requires a previously captured artifact at ${join(artifactDir, "2026-04-10.json")}.`
+    );
     await expect(access(join(artifactDir, "2026-04-10.json"))).rejects.toThrow();
     expect(fetchDraftKingsClassicSalarySlate).not.toHaveBeenCalled();
   });

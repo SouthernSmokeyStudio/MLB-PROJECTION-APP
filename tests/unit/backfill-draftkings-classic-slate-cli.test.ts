@@ -59,7 +59,7 @@ describe("runBackfillDraftKingsClassicSlateCli", () => {
   it("exits nonzero when no matching slate exists", async () => {
     vi.mocked(backfillDraftKingsClassicSlate).mockResolvedValue({
       success: false,
-      error: "No DraftKings Classic salary slate matched the requested date."
+      error: "DraftKings Classic upcoming capture no longer includes 2026-04-10; replay requires a previously captured artifact at data/draftkings-classic/2026-04-10.json."
     });
     const { errors, io } = createIo();
 
@@ -67,7 +67,7 @@ describe("runBackfillDraftKingsClassicSlateCli", () => {
 
     expect(code).toBe(1);
     expect(errors[0]).toContain("FAILED:");
-    expect(errors[0]).toContain("No DraftKings Classic salary slate matched the requested date.");
+    expect(errors[0]).toContain("DraftKings Classic upcoming capture no longer includes 2026-04-10; replay requires a previously captured artifact at data/draftkings-classic/2026-04-10.json.");
   });
 
   it("exits zero on success", async () => {
