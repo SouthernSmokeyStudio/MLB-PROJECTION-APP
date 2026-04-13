@@ -86,8 +86,10 @@ const makeStubRow = (gameId: string): RawGameStarterIntelligenceRow => ({
 });
 
 const makeRepository = (
-  upsertImpl: (payload: UpsertGameStarterIntelligencePayload) => Promise<RawGameStarterIntelligenceRow> = async (p) => makeStubRow(p.game_id)
+  upsertImpl: (payload: UpsertGameStarterIntelligencePayload) => Promise<RawGameStarterIntelligenceRow> = async (p) => makeStubRow(p.game_id),
+  assertImpl: (sourceKey: string) => Promise<void> = async (_k) => { return; }
 ): StarterIntelligenceRepository => ({
+  assertStarterSourceRegistered: vi.fn(assertImpl),
   readStarterSources: vi.fn(),
   readGameStarterIntelligence: vi.fn(),
   readGameStarterIntelligenceByDate: vi.fn(),

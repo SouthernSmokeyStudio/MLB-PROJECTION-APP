@@ -1,5 +1,5 @@
 import type { ProjectedSourceResult } from "@lib/contracts/projected-source";
-import { nowISO, ok, type Result } from "@lib/contracts/types";
+import { nowISO, ok, err, type Result } from "@lib/contracts/types";
 import { normalizeProjectedStarter, parseTeamsFromGameId } from "./normalize";
 import type { StarterIntelligenceRepository, UpsertGameStarterIntelligencePayload } from "./repository";
 
@@ -32,6 +32,14 @@ export const ingestRotowireProjectedStarters = async (
   repository: StarterIntelligenceRepository,
   options: IngestRotowireProjectedStartersOptions = {}
 ): Promise<Result<IngestRotowireProjectedStartersResult, string>> => {
+  // Fail closed: assert the rotowire source is registered before touching the DB.
+  try {
+    await repository.assertStarterSourceRegistered("rotowire");
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : String(e);
+    return err(msg);
+  }
+
   const observedAt = options.observedAt ?? nowISO();
   const errors: string[] = [];
   let ingested = 0;

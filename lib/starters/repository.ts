@@ -1,5 +1,5 @@
 import type { PostgrestError, SupabaseClient } from "@supabase/supabase-js";
-import { STARTER_INTELLIGENCE_TABLE } from "./constants";
+import { STARTER_INTELLIGENCE_TABLE, STARTER_SOURCES_TABLE } from "./constants";
 import type { GameStarterIntelligenceRow, RawGameStarterIntelligenceRow, StarterSourceRow } from "./types";
 
 /**
@@ -43,9 +43,14 @@ export interface UpsertGameStarterIntelligencePayload {
 
 /**
  * Type-safe repository interface for starter intelligence storage.
- * Slice 1: contract boundary only. Implementation deferred to Slice 2.
  */
 export interface StarterIntelligenceRepository {
+  /**
+   * Asserts the given source_key exists in starter_sources.
+   * Throws loudly if missing — fail closed before any ingest proceeds.
+   */
+  assertStarterSourceRegistered(sourceKey: string): Promise<void>;
+
   readStarterSources(): Promise<readonly StarterSourceRow[]>;
 
   readGameStarterIntelligence(
@@ -70,6 +75,26 @@ export interface StarterIntelligenceRepository {
 export const createStarterIntelligenceRepository = (
   client: SupabaseClient
 ): StarterIntelligenceRepository => ({
+  assertStarterSourceRegistered: async (sourceKey: string): Promise<void> => {
+    interface AssertQueryResult {
+      readonly data: { readonly source_key: string } | null;
+      readonly error: PostgrestError | null;
+    }
+
+    const { data, error } = (await client
+      .from(STARTER_SOURCES_TABLE)
+      .select("source_key")
+      .eq("source_key", sourceKey)
+      .single()) as AssertQueryResult;
+
+    if (error !== null || data === null) {
+      throw new Error(
+        `Starter source not registered: "${sourceKey}". ` +
+        `Run supabase/migrations/20260413000001_seed_starter_sources.sql before ingesting.`
+      );
+    }
+  },
+
   readStarterSources: async (): Promise<readonly StarterSourceRow[]> => {
     throw new Error("readStarterSources: not implemented — read path deferred.");
   },
