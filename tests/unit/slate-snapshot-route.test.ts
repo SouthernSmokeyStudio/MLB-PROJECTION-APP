@@ -18,7 +18,6 @@ vi.mock("@lib/services", async () => {
   const actual = await vi.importActual<typeof import("@lib/services")>("@lib/services");
   return {
     ...actual,
-    getUtcDateString: () => "2026-03-27",
     loadLiveSlate: vi.fn(),
     loadDraftKingsClassicSlate: vi.fn(),
     loadDraftKingsSportsbookMlbMoneylineSlate: vi.fn(),
@@ -40,6 +39,14 @@ vi.mock("@lib/materializer", async () => {
   };
 });
 
+vi.mock("@lib/materializer/schedule", async () => {
+  const actual = await vi.importActual<typeof import("@lib/materializer/schedule")>("@lib/materializer/schedule");
+  return {
+    ...actual,
+    getDateInScheduleTimezone: vi.fn(() => "2026-04-12")
+  };
+});
+
 import { GET } from "@/app/api/slate-snapshot/route";
 import {
   loadDraftKingsClassicSlate,
@@ -47,6 +54,7 @@ import {
   loadLiveSlate
 } from "@lib/services";
 import { buildMaterializerConfig } from "@lib/materializer";
+import { getDateInScheduleTimezone } from "@lib/materializer/schedule";
 
 const prepared = preparedFixture as unknown as PreparedGameInputs;
 const playerCards = buildPlayerCards(prepared).players;
@@ -625,5 +633,52 @@ describe("/api/slate-snapshot route", () => {
     const liveSlateOptions = vi.mocked(loadLiveSlate).mock.calls[0]?.[1];
     expect(liveSlateOptions?.projectedGames).toBeInstanceOf(Map);
     expect(liveSlateOptions?.projectedGames?.get("mlb-2026-03-27-nyy-bos" as never)?.away_starter?.player_id).toBe("gerrit-cole");
+  });
+
+  it("defaults the route date from the schedule timezone when no date query is provided", async () => {
+    vi.mocked(loadLiveSlate).mockResolvedValue({
+      success: true,
+      data: {
+        source: "mlb-statsapi-live",
+        date: "2026-04-12",
+        generated_at: "2026-04-12T05:30:00Z",
+        counts: {
+          fetched_raw: 0,
+          parsed: 0,
+          normalized: 0,
+          prepared: 0,
+          boxscore_enriched: 0
+        },
+        note: null,
+        games: []
+      }
+    });
+    vi.mocked(loadDraftKingsClassicSlate).mockResolvedValue({
+      success: true,
+      data: {
+        source: "draftkings-classic-live",
+        date: "2026-04-12",
+        generated_at: "2026-04-12T05:30:00Z",
+        note: "No DraftKings Classic slates available for the requested date.",
+        slates: []
+      }
+    });
+    vi.mocked(loadDraftKingsSportsbookMlbMoneylineSlate).mockResolvedValue({
+      success: true,
+      data: {
+        source: "draftkings-sportsbook-mlb-moneyline-live",
+        date: "2026-04-12",
+        generated_at: "2026-04-12T05:30:00Z",
+        note: "No DraftKings Sportsbook MLB pregame moneyline rows matched the requested date.",
+        moneyline_slate: null
+      }
+    });
+
+    await GET(new NextRequest("http://localhost/api/slate-snapshot"));
+
+    expect(getDateInScheduleTimezone).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(loadLiveSlate)).toHaveBeenCalledWith("2026-04-12", expect.any(Object));
+    expect(vi.mocked(loadDraftKingsClassicSlate)).toHaveBeenCalledWith({ date: "2026-04-12" });
+    expect(vi.mocked(loadDraftKingsSportsbookMlbMoneylineSlate)).toHaveBeenCalledWith({ date: "2026-04-12" });
   });
 });

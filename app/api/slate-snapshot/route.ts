@@ -2,13 +2,13 @@ import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import {
   buildSlateSnapshot,
-  getUtcDateString,
   loadDraftKingsClassicSlate,
   loadDraftKingsSportsbookMlbMoneylineSlate,
   loadLiveSlate,
   loadMaterializedSlate
 } from "@lib/services";
 import { buildMaterializerConfig } from "@lib/materializer";
+import { getDateInScheduleTimezone } from "@lib/materializer/schedule";
 
 const DEFAULT_SIMULATION = {
   seed: 20260328,
@@ -42,12 +42,12 @@ const loadProjectedGames = async (date: string) => {
 };
 
 export async function GET(request: NextRequest): Promise<Response> {
-  const date = request.nextUrl.searchParams.get("date") ?? getUtcDateString();
+  const date = request.nextUrl.searchParams.get("date") ?? getDateInScheduleTimezone();
   const draftGroupId = request.nextUrl.searchParams.get("draft_group_id") ?? undefined;
   // Attempt to load a materialized baseline.  This is a local file read
-  // that fails silently when no artifact exists — the live pipeline is the
+  // that fails silently when no artifact exists â€” the live pipeline is the
   // sole authority and the baseline only supplements the initial fallback.
-  // Fail-closed: stale artifacts (>24h) are rejected — they must NOT be
+  // Fail-closed: stale artifacts (>24h) are rejected â€” they must NOT be
   // used as a baseline.
   const materializedResult = await loadMaterializedSlate(date);
   const materializedBaseline =
@@ -117,7 +117,7 @@ export async function GET(request: NextRequest): Promise<Response> {
       mlbError
         ? {
             dfs_edge_reason: mlbError
-              ? `MLB schedule unavailable — cannot build DFS edge: ${mlbError}`
+              ? `MLB schedule unavailable â€” cannot build DFS edge: ${mlbError}`
               : dfsEdgeReason ??
                 "No DraftKings Classic salary slate matched the requested date."
           }
@@ -138,7 +138,7 @@ export async function GET(request: NextRequest): Promise<Response> {
       ...(!loadedMoneylineSlate.success || !loadedMoneylineSlate.data.moneyline_slate || mlbError
         ? {
             betting_edge_reason: mlbError
-              ? `MLB schedule unavailable — cannot build betting edge: ${mlbError}`
+              ? `MLB schedule unavailable â€” cannot build betting edge: ${mlbError}`
               : bettingEdgeReason ??
                 "No DraftKings Sportsbook MLB pregame moneyline rows matched the requested date."
           }
