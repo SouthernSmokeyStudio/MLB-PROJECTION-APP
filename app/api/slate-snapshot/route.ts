@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+﻿import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import {
   buildSlateSnapshot,
@@ -112,14 +112,18 @@ export async function GET(request: NextRequest): Promise<Response> {
             player_projections_reason: mlbError
           }
         : {}),
-      ...(!loadedDraftKingsSlate.success ||
-      loadedDraftKingsSlate.data.slates.length === 0 ||
-      mlbError
+      ...(mlbError
         ? {
-            dfs_edge_reason: mlbError
-              ? `MLB schedule unavailable â€” cannot build DFS edge: ${mlbError}`
-              : dfsEdgeReason ??
-                "No DraftKings Classic salary slate matched the requested date."
+            dfs_edge_reason: `MLB schedule unavailable -- cannot build DFS edge: ${mlbError}`
+          }
+        : !loadedDraftKingsSlate.success || loadedDraftKingsSlate.data.slates.length === 0
+        ? {
+            dfs_edge_degraded: {
+              source: DFS_EDGE_SOURCE,
+              note:
+                dfsEdgeReason ??
+                "No DraftKings Classic salary captured for this date -- projections only."
+            }
           }
         : {
             dfs_edge: {
@@ -135,12 +139,18 @@ export async function GET(request: NextRequest): Promise<Response> {
               salary_slate_inventory: loadedDraftKingsSlate.data.slates
             }
           }),
-      ...(!loadedMoneylineSlate.success || !loadedMoneylineSlate.data.moneyline_slate || mlbError
+      ...(mlbError
         ? {
-            betting_edge_reason: mlbError
-              ? `MLB schedule unavailable â€” cannot build betting edge: ${mlbError}`
-              : bettingEdgeReason ??
-                "No DraftKings Sportsbook MLB pregame moneyline rows matched the requested date."
+            betting_edge_reason: `MLB schedule unavailable -- cannot build betting edge: ${mlbError}`
+          }
+        : !loadedMoneylineSlate.success || !loadedMoneylineSlate.data.moneyline_slate
+        ? {
+            betting_edge_degraded: {
+              source: BETTING_EDGE_SOURCE,
+              note:
+                bettingEdgeReason ??
+                "No DraftKings Sportsbook moneyline captured for this date -- projections only."
+            }
           }
         : {
             betting_edge: {

@@ -28,7 +28,12 @@ export interface BuildDfsEdgeBoardOptions {
   readonly generated_at?: string;
   readonly counts: LiveSlateCounts;
   readonly note?: string | null;
-  readonly draftkings_classic: {
+  /**
+   * When omitted, the board runs in salary-degraded mode: all rows are held
+   * with `salary-unavailable` and the payload `draftkings_classic` header is
+   * null. Projections are still published.
+   */
+  readonly draftkings_classic?: {
     readonly draft_group_id: string;
     readonly label: string;
     readonly min_start_time: string;
@@ -301,9 +306,11 @@ const buildRows = (
 
   const selectedSalarySlate: DraftKingsClassicSalarySlate | undefined =
     options.salary_slate_inventory
-      ? options.salary_slate_inventory.find(
-          (item) => item.draft_group_id === options.draftkings_classic.draft_group_id
-        )?.salary_slate
+      ? options.draftkings_classic
+        ? options.salary_slate_inventory.find(
+            (item) => item.draft_group_id === options.draftkings_classic!.draft_group_id
+          )?.salary_slate
+        : undefined
       : options.salary_slate;
 
   const selectedCompetitionGameKeys = new Set(
@@ -397,7 +404,21 @@ export const buildDfsEdgeBoard = (
   sourceGames: readonly LiveSlateSourceGame[],
   options: BuildDfsEdgeBoardOptions
 ): DfsEdgeBoardPayload => {
-  const players = buildRows(sourceGames, options);
+  const rawPlayers = buildRows(sourceGames, options);
+
+  // Salary-degraded mode: draftkings_classic was not supplied. Override every
+  // held row's blocked reason to "salary-unavailable" so the UI can surface an
+  // honest reason instead of internal join-miss messages.
+  const players: readonly DfsEdgeBoardRow[] = options.draftkings_classic
+    ? rawPlayers
+    : rawPlayers.map((p) => ({
+        ...p,
+        draftkings_classic: {
+          ...p.draftkings_classic,
+          blocked: { is_blocked: true as const, blocked_reason: "salary-unavailable" }
+        }
+      }));
+
   const readyPlayers = players.filter(isReadyRow);
   const readyPitchers = [...readyPlayers.filter(isPitcherRow)].sort(sortReadyPitchers);
   const readyBatters = [...readyPlayers.filter((player) => !isPitcherRow(player))].sort(
@@ -427,15 +448,17 @@ export const buildDfsEdgeBoard = (
     mode: "dfs-edge-board-v1",
     date: options.date,
     generated_at: asISOTimestamp(options.generated_at ?? new Date().toISOString()),
-    draftkings_classic: {
-      platform: "draftkings",
-      contest_type: "classic",
-      draft_group_id: options.draftkings_classic.draft_group_id,
-      label: options.draftkings_classic.label,
-      min_start_time: asISOTimestamp(options.draftkings_classic.min_start_time),
-      max_start_time: asISOTimestamp(options.draftkings_classic.max_start_time),
-      tags: options.draftkings_classic.tags
-    },
+    draftkings_classic: options.draftkings_classic
+      ? {
+          platform: "draftkings",
+          contest_type: "classic",
+          draft_group_id: options.draftkings_classic.draft_group_id,
+          label: options.draftkings_classic.label,
+          min_start_time: asISOTimestamp(options.draftkings_classic.min_start_time),
+          max_start_time: asISOTimestamp(options.draftkings_classic.max_start_time),
+          tags: options.draftkings_classic.tags
+        }
+      : null,
     summary: {
       total_players: players.length,
       ready_players: readyPlayers.length,
@@ -451,10 +474,12 @@ export const buildDfsEdgeBoard = (
     },
     counts: {
       ...options.counts,
-      salary_entries: options.salary_slate_inventory
-        ? options.salary_slate_inventory.reduce((sum, s) => sum + s.salary_slate.salaries.length, 0)
-        : (options.salary_slate?.salaries.length ?? 0),
-      matched_salaries: matchedSalaries
+      salary_entries: options.draftkings_classic
+        ? options.salary_slate_inventory
+          ? options.salary_slate_inventory.reduce((sum, s) => sum + s.salary_slate.salaries.length, 0)
+          : (options.salary_slate?.salaries.length ?? 0)
+        : 0,
+      matched_salaries: options.draftkings_classic ? matchedSalaries : 0
     },
     ready_pitchers: readyPitchers,
     ready_batters: readyBatters,

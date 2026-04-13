@@ -8,6 +8,7 @@ import type {
 import type { DraftKingsSportsbookMlbMoneylineSlate } from "@lib/contracts/draftkings-sportsbook-mlb-moneyline";
 import { asGameId, asISOTimestamp } from "@lib/contracts/types";
 import type { TwoWayMarketEdge } from "@lib/market/edge";
+import { buildGameCard } from "./buildGameCard";
 import {
   joinDraftKingsSportsbookMoneylines,
   type DraftKingsSportsbookMoneylineGameCard
@@ -24,7 +25,12 @@ export interface BuildBettingEdgeBoardOptions {
     readonly site: "US-TN-SB";
     readonly label: string;
   };
-  readonly moneyline_slate: DraftKingsSportsbookMlbMoneylineSlate;
+  /**
+   * When omitted, the board runs in market-degraded mode: all rows are held
+   * with `market-unavailable` and the payload `draftkings_sportsbook_moneyline`
+   * header is null. Projections are still published.
+   */
+  readonly moneyline_slate?: DraftKingsSportsbookMlbMoneylineSlate;
   readonly simulation?: {
     readonly seed?: number;
     readonly iterations?: number;
@@ -110,6 +116,71 @@ const toBettingEdgeBoardRow = ({
         edge: homeMoneyline
       }),
       blocked: game.draftkings_sportsbook_moneyline.blocked
+    }
+  };
+};
+
+const buildNullMoneylineSide = (
+  teamSide: "away" | "home",
+  teamAbbreviation: string,
+  teamFullName: string
+): BettingEdgeBoardMoneylineSide => ({
+  team_side: teamSide,
+  team_abbreviation: teamAbbreviation,
+  team_full_name: teamFullName,
+  market_odds_american: null,
+  model_probability: null,
+  market_implied_probability: null,
+  market_no_vig_probability: null,
+  edge: null,
+  fair_american_odds: null
+});
+
+const buildDegradedBettingRow = (
+  sourceGame: LiveSlateSourceGame,
+  simulation: BuildBettingEdgeBoardOptions["simulation"]
+): BettingEdgeBoardRow => {
+  const gameCard = buildGameCard(sourceGame.preparedGame, {
+    ...(simulation ? { simulation } : {})
+  });
+
+  return {
+    game_id: asGameId(gameCard.game_id),
+    matchup: buildMatchupLabel(sourceGame),
+    scheduled_start: sourceGame.canonicalGame.scheduled_start,
+    status: sourceGame.canonicalGame.status,
+    venue_name: sourceGame.canonicalGame.venue?.name ?? null,
+    away_team_abbreviation: sourceGame.canonicalGame.away.team.abbreviation,
+    away_team_full_name: sourceGame.canonicalGame.away.team.full_name,
+    home_team_abbreviation: sourceGame.canonicalGame.home.team.abbreviation,
+    home_team_full_name: sourceGame.canonicalGame.home.team.full_name,
+    projection: {
+      blocked: gameCard.blocked,
+      projected_away_runs: gameCard.deterministic.projected_away_runs,
+      projected_home_runs: gameCard.deterministic.projected_home_runs,
+      projected_total: gameCard.deterministic.projected_total,
+      away_win_probability: gameCard.simulation?.away_win_probability ?? null,
+      home_win_probability: gameCard.simulation?.home_win_probability ?? null
+    },
+    draftkings_sportsbook_moneyline: {
+      provider: "draftkings-sportsbook",
+      sport: "MLB",
+      market_type: "moneyline",
+      event_id: null,
+      market_id: null,
+      away_odds_american: null,
+      home_odds_american: null,
+      away: buildNullMoneylineSide(
+        "away",
+        sourceGame.canonicalGame.away.team.abbreviation,
+        sourceGame.canonicalGame.away.team.full_name
+      ),
+      home: buildNullMoneylineSide(
+        "home",
+        sourceGame.canonicalGame.home.team.abbreviation,
+        sourceGame.canonicalGame.home.team.full_name
+      ),
+      blocked: { is_blocked: true, blocked_reason: "market-unavailable" }
     }
   };
 };
@@ -233,6 +304,38 @@ export const buildBettingEdgeBoard = (
   sourceGames: readonly LiveSlateSourceGame[],
   options: BuildBettingEdgeBoardOptions
 ): BettingEdgeBoardPayload => {
+  // Market-degraded mode: no moneyline slate supplied. Emit projection-only
+  // rows, all held with market-unavailable. No edge computation is possible.
+  if (!options.moneyline_slate) {
+    const rows = sourceGames.map((sourceGame) =>
+      buildDegradedBettingRow(sourceGame, options.simulation)
+    );
+    const heldGames = [...rows].sort(sortHeldGames);
+
+    return {
+      source: options.source,
+      mode: "betting-edge-board-v1",
+      date: options.date,
+      generated_at: asISOTimestamp(options.generated_at ?? new Date().toISOString()),
+      draftkings_sportsbook_moneyline: null,
+      summary: {
+        total_games: rows.length,
+        ready_games: 0,
+        held_games: heldGames.length,
+        average_ready_edge: null,
+        top_edge_side: null
+      },
+      counts: {
+        ...options.counts,
+        moneyline_entries: 0,
+        matched_markets: 0
+      },
+      ready_games: [],
+      held_games: heldGames,
+      note: options.note ?? null
+    };
+  }
+
   const joined = joinDraftKingsSportsbookMoneylines({
     sourceGames,
     moneylineSlate: options.moneyline_slate,

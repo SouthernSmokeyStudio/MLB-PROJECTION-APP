@@ -47,6 +47,15 @@ export interface BuildSlateSnapshotOptions {
     readonly salary_slate_inventory?: readonly LoadedDraftKingsClassicSlateItem[];
   };
   readonly dfs_edge_reason?: string;
+  /**
+   * Emit DFS Edge rows using projection data only. Salary is unavailable so
+   * every row is held with `salary-unavailable`. The contest header is null.
+   * Ignored when `dfs_edge` or `dfs_edge_reason` is also set.
+   */
+  readonly dfs_edge_degraded?: {
+    readonly source?: string;
+    readonly note?: string | null;
+  };
   readonly betting_edge?: Omit<
     BuildBettingEdgeBoardOptions,
     "date" | "generated_at" | "counts" | "simulation"
@@ -54,6 +63,16 @@ export interface BuildSlateSnapshotOptions {
     readonly note?: string | null;
   };
   readonly betting_edge_reason?: string;
+  /**
+   * Emit Betting Edge rows using projection data only. Market data is
+   * unavailable so every row is held with `market-unavailable`. The sportsbook
+   * header is null. Ignored when `betting_edge` or `betting_edge_reason` is
+   * also set.
+   */
+  readonly betting_edge_degraded?: {
+    readonly source?: string;
+    readonly note?: string | null;
+  };
   readonly schedule_reason?: string;
   readonly player_projections_reason?: string;
   readonly smoke_signal_reason?: string;
@@ -243,6 +262,21 @@ export const buildSlateSnapshot = (
 
         return wrapSection(payload, buildDfsStatus(payload));
       })()
+    : options.dfs_edge_degraded
+    ? (() => {
+        const payload = buildDfsEdgeBoard(sourceGames, {
+          source: options.dfs_edge_degraded!.source ?? options.source,
+          date: options.date,
+          generated_at: generatedAt,
+          counts: options.counts,
+          note: options.dfs_edge_degraded!.note ?? null,
+          // No draftkings_classic → salary-degraded mode
+          ...(simulationOptions ? { simulation: simulationOptions } : {}),
+          ...(loadedCrosswalk ? { crosswalk: loadedCrosswalk } : {})
+        });
+
+        return wrapSection(payload, buildDfsStatus(payload));
+      })()
     : wrapSection<DfsEdgeBoardPayload>(
         null,
         buildStatus(
@@ -259,6 +293,21 @@ export const buildSlateSnapshot = (
           date: options.date,
           generated_at: generatedAt,
           counts: options.counts,
+          ...(simulationOptions ? { simulation: simulationOptions } : {})
+        });
+
+        return wrapSection(payload, buildBettingStatus(payload));
+      })()
+    : options.betting_edge_degraded
+    ? (() => {
+        const payload = buildBettingEdgeBoard(sourceGames, {
+          source: options.betting_edge_degraded!.source ?? options.source,
+          date: options.date,
+          generated_at: generatedAt,
+          counts: options.counts,
+          note: options.betting_edge_degraded!.note ?? null,
+          draftkings_sportsbook_moneyline: { site: "US-TN-SB", label: "DraftKings Sportsbook MLB Pregame Moneyline" },
+          // No moneyline_slate → market-degraded mode
           ...(simulationOptions ? { simulation: simulationOptions } : {})
         });
 

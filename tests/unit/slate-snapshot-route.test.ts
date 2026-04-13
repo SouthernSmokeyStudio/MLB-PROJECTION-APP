@@ -346,19 +346,26 @@ describe("/api/slate-snapshot route", () => {
     const smokeSignal = payload.smoke_signal as Record<string, unknown>;
     const publication = payload.publication as Record<string, unknown>;
 
-    expect(dfsEdge.payload).toBeNull();
-    expect((dfsEdge.status as Record<string, unknown>).state).toBe("blocked");
-    expect((dfsEdge.status as Record<string, unknown>).reason).toBe(
+    // Degraded-mode DFS: projections are available, salary isn't.
+    // Payload publishes with draftkings_classic: null and all rows held.
+    expect(dfsEdge.payload).not.toBeNull();
+    expect((dfsEdge.payload as Record<string, unknown>).draftkings_classic).toBeNull();
+    expect((dfsEdge.status as Record<string, unknown>).state).not.toBe("blocked");
+    expect((dfsEdge.payload as Record<string, unknown>).note).toBe(
       "No DraftKings Classic salary slate matched the requested date."
     );
-    expect(bettingEdge.payload).toBeNull();
-    expect((bettingEdge.status as Record<string, unknown>).state).toBe("blocked");
-    expect((bettingEdge.status as Record<string, unknown>).reason).toBe(
-      "moneyline fetch failed"
-    );
-    expect((smokeSignal.status as Record<string, unknown>).state).toBe("partial");
+
+    // Degraded-mode Betting: projections are available, moneyline isn't.
+    // Payload publishes with draftkings_sportsbook_moneyline: null and all rows held.
+    expect(bettingEdge.payload).not.toBeNull();
+    expect((bettingEdge.payload as Record<string, unknown>).draftkings_sportsbook_moneyline).toBeNull();
+    expect((bettingEdge.status as Record<string, unknown>).state).not.toBe("blocked");
+    expect((bettingEdge.payload as Record<string, unknown>).note).toBe("moneyline fetch failed");
+
     expect((smokeSignal.payload as Record<string, unknown>).mode).toBe("smoke-signal-v1");
-    expect(publication.is_complete).toBe(false);
+    // Nothing is "blocked" in degraded mode — publication can complete
+    expect(publication.blocked_sections).not.toContain("dfs_edge");
+    expect(publication.blocked_sections).not.toContain("betting_edge");
   });
 
   it("returns a degraded 200 snapshot when the live slate loader fails", async () => {
