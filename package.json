@@ -12,7 +12,8 @@
     "test": "vitest run",
     "materialize": "tsx scripts/materialize.ts",
     "backfill:dk-classic": "tsx scripts/backfillDraftKingsClassicSlate.ts",
-    "capture:dk-classic": "tsx scripts/backfillDraftKingsClassicSlate.ts"
+    "capture:dk-classic": "tsx scripts/backfillDraftKingsClassicSlate.ts",
+    "capture:dk-sportsbook": "tsx scripts/backfillDraftKingsSportsbookMlbMoneylineSlate.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "2.101.1",
