@@ -4,6 +4,11 @@ import { backfillDraftKingsClassicSlate } from "../lib/services/loadDraftKingsCl
 const isValidDate = (value: string): boolean =>
   /^\d{4}-\d{2}-\d{2}$/.test(value) && !Number.isNaN(Date.parse(`${value}T00:00:00Z`));
 
+const formatFailureMessage = (error: string): string =>
+  error === "No DraftKings Classic salary slate matched the requested date."
+    ? `${error} Same-day capture may already be too late; no recovery from the current upcoming DraftKings feed is implied.`
+    : error;
+
 export const runBackfillDraftKingsClassicSlateCli = async (
   args: readonly string[],
   io: {
@@ -17,14 +22,14 @@ export const runBackfillDraftKingsClassicSlateCli = async (
   const date = args[0];
 
   if (args.length !== 1 || !date || !isValidDate(date)) {
-    io.error("[dk-classic-backfill] usage: tsx scripts/backfillDraftKingsClassicSlate.ts YYYY-MM-DD");
+    io.error("[dk-classic-backfill] usage: npm run backfill:dk-classic -- YYYY-MM-DD");
     return 1;
   }
 
   const result = await backfillDraftKingsClassicSlate({ date });
 
   if (!result.success) {
-    io.error(`[dk-classic-backfill] FAILED: ${result.error}`);
+    io.error(`[dk-classic-backfill] FAILED: ${formatFailureMessage(result.error)}`);
     return 1;
   }
 
