@@ -9,6 +9,8 @@ import {
 } from "@lib/services";
 import { buildMaterializerConfig } from "@lib/materializer";
 import { getDateInScheduleTimezone } from "@lib/materializer/schedule";
+import type { GameId } from "@lib/contracts/types";
+import type { ProjectedGameData } from "@lib/contracts/projected-source";
 
 const DEFAULT_SIMULATION = {
   seed: 20260328,
@@ -20,7 +22,7 @@ const DFS_EDGE_SOURCE = "mlb-statsapi-live+draftkings-classic";
 const BETTING_EDGE_SOURCE = "mlb-statsapi-live+draftkings-sportsbook-moneyline";
 const BETTING_EDGE_LABEL = "DraftKings Sportsbook MLB Pregame Moneyline";
 
-const loadProjectedGames = async (date: string) => {
+const loadProjectedGames = async (date: string): Promise<{ games: Map<GameId, ProjectedGameData> | undefined; note: string | null }> => {
   const config = buildMaterializerConfig(
     {
       ROTOWIRE_ENDPOINT_URL: process.env.ROTOWIRE_ENDPOINT_URL,
@@ -29,16 +31,23 @@ const loadProjectedGames = async (date: string) => {
     { officialOnly: false }
   );
 
-  if (!config.success || !config.data.projectedAdapter) {
-    return undefined;
+  if (!config.success) {
+    return { games: undefined, note: `Projected source config failed: ${config.error}` };
+  }
+
+  if (!config.data.projectedAdapter) {
+    return { games: undefined, note: "Projected source adapter not available (official-only mode)." };
   }
 
   const projected = await config.data.projectedAdapter.fetchProjectedData(date);
   if (!projected.success) {
-    return undefined;
+    return { games: undefined, note: `Projected source fetch failed: ${projected.error}` };
   }
 
-  return new Map(projected.data.games.map((game) => [game.game_id, game]));
+  return {
+    games: new Map(projected.data.games.map((game) => [game.game_id, game])),
+    note: null
+  };
 };
 
 export async function GET(request: NextRequest): Promise<Response> {
@@ -54,12 +63,12 @@ export async function GET(request: NextRequest): Promise<Response> {
     materializedResult.success && !materializedResult.data.metadata.is_stale
       ? materializedResult.data.slate
       : undefined;
-  const projectedGames = await loadProjectedGames(date);
+  const projectedResult = await loadProjectedGames(date);
 
   const [loadedLiveSlate, loadedDraftKingsSlate, loadedMoneylineSlate] = await Promise.all([
     loadLiveSlate(date, {
       materializedBaseline,
-      ...(projectedGames ? { projectedGames } : {})
+      ...(projectedResult.games ? { projectedGames: projectedResult.games } : {})
     }),
     loadDraftKingsClassicSlate(
       draftGroupId
@@ -104,7 +113,7 @@ export async function GET(request: NextRequest): Promise<Response> {
       },
       player_projections: {
         source: loadedLiveSlate.success ? loadedLiveSlate.data.source : SNAPSHOT_SOURCE,
-        note: mlbError ?? liveNote
+        note: mlbError ?? projectedResult.note ?? liveNote
       },
       ...(mlbError
         ? {
