@@ -22,7 +22,7 @@ export const runBackfillDraftKingsClassicSlateCli = async (
   const date = args[0];
 
   if (args.length !== 1 || !date || !isValidDate(date)) {
-    io.error("[dk-classic-backfill] usage: npm run backfill:dk-classic -- YYYY-MM-DD");
+    io.error("[dk-classic-backfill] usage: npm run capture:dk-classic -- YYYY-MM-DD  (run before DraftKings upcoming feed rotates away)");
     return 1;
   }
 

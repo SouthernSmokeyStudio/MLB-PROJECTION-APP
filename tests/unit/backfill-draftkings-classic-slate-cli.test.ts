@@ -44,7 +44,7 @@ describe("runBackfillDraftKingsClassicSlateCli", () => {
     const code = await runBackfillDraftKingsClassicSlateCli([], io);
 
     expect(code).toBe(1);
-    expect(errors[0]).toContain("usage: npm run backfill:dk-classic -- YYYY-MM-DD");
+    expect(errors[0]).toContain("usage: npm run capture:dk-classic -- YYYY-MM-DD");
   });
 
   it("exits nonzero on invalid date", async () => {
@@ -53,7 +53,7 @@ describe("runBackfillDraftKingsClassicSlateCli", () => {
     const code = await runBackfillDraftKingsClassicSlateCli(["2026-04"], io);
 
     expect(code).toBe(1);
-    expect(errors[0]).toContain("usage: npm run backfill:dk-classic -- YYYY-MM-DD");
+    expect(errors[0]).toContain("usage: npm run capture:dk-classic -- YYYY-MM-DD");
   });
 
   it("adds an explicit missed-window warning for the generic no-match failure", async () => {

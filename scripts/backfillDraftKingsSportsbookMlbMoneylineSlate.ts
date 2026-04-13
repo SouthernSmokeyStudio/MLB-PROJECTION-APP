@@ -17,7 +17,7 @@ export const runCaptureSportsbookMlbMoneylineSlateCli = async (
   const date = args[0];
 
   if (args.length !== 1 || !date || !isValidDate(date)) {
-    io.error("[dk-sportsbook-capture] usage: npm run capture:dk-sportsbook -- YYYY-MM-DD");
+    io.error("[dk-sportsbook-capture] usage: npm run capture:dk-sportsbook -- YYYY-MM-DD  (run before DraftKings pregame markets rotate away)");
     return 1;
   }
 
