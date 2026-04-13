@@ -1,3 +1,5 @@
+import type { PostgrestError, SupabaseClient } from "@supabase/supabase-js";
+import { STARTER_INTELLIGENCE_TABLE } from "./constants";
 import type { GameStarterIntelligenceRow, RawGameStarterIntelligenceRow, StarterSourceRow } from "./types";
 
 /**
@@ -62,12 +64,50 @@ export interface StarterIntelligenceRepository {
 
 /**
  * Creates the starter intelligence repository bound to a Supabase client.
- * Placeholder — throws until Slice 2 implementation is wired.
+ * read* methods are deferred (Slice 3+). upsertGameStarterIntelligence is
+ * fully implemented for the Slice 2 ingest path.
  */
 export const createStarterIntelligenceRepository = (
-  _client: unknown
-): StarterIntelligenceRepository => {
-  throw new Error(
-    "createStarterIntelligenceRepository: not implemented — Slice 2 implementation required."
-  );
-};
+  client: SupabaseClient
+): StarterIntelligenceRepository => ({
+  readStarterSources: async (): Promise<readonly StarterSourceRow[]> => {
+    throw new Error("readStarterSources: not implemented — read path deferred.");
+  },
+
+  readGameStarterIntelligence: async (
+    _gameId: string,
+    _gameDate: string
+  ): Promise<GameStarterIntelligenceRow | null> => {
+    throw new Error("readGameStarterIntelligence: not implemented — read path deferred.");
+  },
+
+  readGameStarterIntelligenceByDate: async (
+    _gameDate: string
+  ): Promise<readonly GameStarterIntelligenceRow[]> => {
+    throw new Error("readGameStarterIntelligenceByDate: not implemented — read path deferred.");
+  },
+
+  upsertGameStarterIntelligence: async (
+    payload: UpsertGameStarterIntelligencePayload
+  ): Promise<RawGameStarterIntelligenceRow> => {
+    interface SupabaseQueryResult {
+      readonly data: unknown;
+      readonly error: PostgrestError | null;
+    }
+
+    const { data, error } = (await client
+      .from(STARTER_INTELLIGENCE_TABLE)
+      .upsert(
+        { ...payload, updated_at: new Date().toISOString() },
+        { onConflict: "game_id" }
+      )
+      .select()
+      .single()) as SupabaseQueryResult;
+
+    if (error) {
+      throw new Error(`Failed to upsert game starter intelligence [${payload.game_id}]: ${error.message}`);
+    }
+
+    return data as RawGameStarterIntelligenceRow;
+  }
+});
