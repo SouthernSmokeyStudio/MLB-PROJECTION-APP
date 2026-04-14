@@ -11,6 +11,9 @@ import { buildMaterializerConfig } from "@lib/materializer";
 import { getDateInScheduleTimezone } from "@lib/materializer/schedule";
 import type { GameId } from "@lib/contracts/types";
 import type { ProjectedGameData } from "@lib/contracts/projected-source";
+import { getSupabaseWriteClient } from "@lib/supabase/writeClient";
+import { createStarterIntelligenceRepository } from "@lib/starters/repository";
+import { mapStarterIntelligenceToProjectedGamesMap } from "@lib/starters/mapToProjectedGameData";
 
 const DEFAULT_SIMULATION = {
   seed: 20260328,
@@ -50,6 +53,20 @@ const loadProjectedGames = async (date: string): Promise<{ games: Map<GameId, Pr
   };
 };
 
+const loadStarterIntelligenceGames = async (
+  date: string
+): Promise<ReadonlyMap<GameId, ProjectedGameData> | undefined> => {
+  try {
+    const client = getSupabaseWriteClient();
+    const repo = createStarterIntelligenceRepository(client);
+    const rows = await repo.readGameStarterIntelligenceByDate(date);
+    return mapStarterIntelligenceToProjectedGamesMap(rows);
+  } catch {
+    // Fail closed: SI unavailability must not block the main pipeline.
+    return undefined;
+  }
+};
+
 export async function GET(request: NextRequest): Promise<Response> {
   const date = request.nextUrl.searchParams.get("date") ?? getDateInScheduleTimezone();
   const draftGroupId = request.nextUrl.searchParams.get("draft_group_id") ?? undefined;
@@ -64,11 +81,13 @@ export async function GET(request: NextRequest): Promise<Response> {
       ? materializedResult.data.slate
       : undefined;
   const projectedResult = await loadProjectedGames(date);
+  const siGames = await loadStarterIntelligenceGames(date);
 
   const [loadedLiveSlate, loadedDraftKingsSlate, loadedMoneylineSlate] = await Promise.all([
     loadLiveSlate(date, {
       materializedBaseline,
-      ...(projectedResult.games ? { projectedGames: projectedResult.games } : {})
+      ...(projectedResult.games ? { projectedGames: projectedResult.games } : {}),
+      ...(siGames ? { starterIntelligenceGames: siGames } : {})
     }),
     loadDraftKingsClassicSlate(
       draftGroupId

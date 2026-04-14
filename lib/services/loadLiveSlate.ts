@@ -650,6 +650,16 @@ export interface LoadLiveSlateOptions {
    * Same merge semantics as projectedGames.
    */
   readonly inferredGames?: ReadonlyMap<GameId, InferredGameData> | undefined;
+  /**
+   * Optional owned Starter Intelligence, keyed by game_id, mapped to the
+   * canonical ProjectedGameData shape before reaching this layer.
+   *
+   * Precedence: projectedGames (Rotowire) wins if an entry exists for the
+   * game; starterIntelligenceGames fills the projected slot only when
+   * projectedGames has no entry.  The merge law (official > projected >
+   * inferred) continues to govern final resolution.
+   */
+  readonly starterIntelligenceGames?: ReadonlyMap<GameId, ProjectedGameData> | undefined;
 }
 
 /** Artifacts older than this threshold are rejected at the load boundary. */
@@ -741,7 +751,10 @@ export const loadLiveSlate = async (
     ]);
     const boxscorePayload = fetchedBoxscore.success ? fetchedBoxscore.data : null;
     const linescorePayload = fetchedLinescore.success ? fetchedLinescore.data : null;
-    const projectedForGame = options?.projectedGames?.get(game.normalizedGame.game_id) ?? null;
+    const projectedForGame =
+      options?.projectedGames?.get(game.normalizedGame.game_id) ??
+      options?.starterIntelligenceGames?.get(game.normalizedGame.game_id) ??
+      null;
     const playerIdentities = buildPlayerIdentityMap(game, boxscorePayload, projectedForGame);
     const liveScoreState = buildLiveSlateScoreState({
       sourceGame: game,
