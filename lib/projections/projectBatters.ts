@@ -78,6 +78,31 @@ const getMatchupWoba = (batter: PreparedBatterInputs, pitcherHandedness: Handedn
   return batter.season_woba;
 };
 
+const buildFallbackProjectionSlots = (
+  batters: readonly PreparedBatterInputs[]
+): ReadonlyMap<string, number> =>
+  new Map(
+    batters
+      .filter((batter) => batter.lineup_status === "season_stats_fallback")
+      .sort((left, right) => left.player_id.localeCompare(right.player_id))
+      .map((batter, index) => [batter.player_id, Math.min(index + 1, 9)])
+  );
+
+const resolveProjectionSlot = (
+  batter: PreparedBatterInputs,
+  fallbackSlots: ReadonlyMap<string, number>
+): number | null => {
+  if (batter.lineup_status === "confirmed_order") {
+    return batter.batting_order;
+  }
+
+  if (batter.lineup_status === "season_stats_fallback") {
+    return fallbackSlots.get(batter.player_id) ?? null;
+  }
+
+  return null;
+};
+
 const buildTeamBatterProjection = (
   inputs: PreparedGameInputs,
   batters: readonly PreparedBatterInputs[],
@@ -96,27 +121,36 @@ const buildTeamBatterProjection = (
   const lineupAvailabilityFactor = clamp(team.lineup_batters_available / 9, 0.8, 1);
 
   const projections: BatterProjection[] = [];
+  const fallbackSlots = buildFallbackProjectionSlots(batters);
 
   for (const batter of batters) {
-    const slot = batter.batting_order;
+    const projectionSlot = resolveProjectionSlot(batter, fallbackSlots);
     const seasonAvg = batter.season_avg;
     const seasonBbRate = batter.season_bb_rate;
     const seasonHrRate = batter.season_hr_rate;
     const seasonPa = batter.season_pa;
     const seasonSb = batter.season_sb;
+    const isFallbackBatter = batter.lineup_status === "season_stats_fallback";
+    // Local projection-time defaults only for non-lineup fallback batters.
+    // PreparedBatterInputs stays honest: batting_order remains null upstream.
+    const resolvedSeasonBbRate = isFallbackBatter
+      ? seasonBbRate ?? BASELINE_BB_RATE
+      : seasonBbRate;
+    const resolvedSeasonHrRate = isFallbackBatter ? seasonHrRate ?? 0 : seasonHrRate;
+    const resolvedSeasonSb = isFallbackBatter ? seasonSb ?? 0 : seasonSb;
 
     if (
-      slot === null ||
+      projectionSlot === null ||
       seasonAvg === null ||
-      seasonBbRate === null ||
-      seasonHrRate === null ||
+      resolvedSeasonBbRate === null ||
+      resolvedSeasonHrRate === null ||
       seasonPa === null ||
-      seasonSb === null
+      resolvedSeasonSb === null
     ) {
       continue;
     }
 
-    const basePa = PA_BY_SLOT[slot] ?? 3.7;
+    const basePa = PA_BY_SLOT[projectionSlot] ?? 3.7;
     const projectedPa = round2(basePa * teamEnvironmentFactor * lineupAvailabilityFactor);
 
     const matchupWoba =
@@ -143,9 +177,9 @@ const buildTeamBatterProjection = (
       1.2
     );
 
-    const projectedBb = round2(projectedPa * seasonBbRate * walkModifier);
+    const projectedBb = round2(projectedPa * resolvedSeasonBbRate * walkModifier);
     const projectedAb = round2(Math.max(projectedPa - projectedBb, 0));
-    const projectedHr = round2(projectedPa * seasonHrRate * hrModifier);
+    const projectedHr = round2(projectedPa * resolvedSeasonHrRate * hrModifier);
 
     const projectedHits = round2(
       Math.max(projectedAb * seasonAvg * clamp(matchupFactor, 0.85, 1.15), projectedHr)
@@ -164,17 +198,18 @@ const buildTeamBatterProjection = (
 
     const projectedRuns = round2(
       teamProjectedRuns *
-        (RUN_SHARE_BY_SLOT[slot] ?? 0.09) *
+        (RUN_SHARE_BY_SLOT[projectionSlot] ?? 0.09) *
         clamp((batter.season_obp ?? 0.32) / 0.32, 0.8, 1.2)
     );
 
     const projectedRbi = round2(
       teamProjectedRuns *
-        (RBI_SHARE_BY_SLOT[slot] ?? 0.08) *
+        (RBI_SHARE_BY_SLOT[projectionSlot] ?? 0.08) *
         clamp(matchupWoba / BASELINE_WOBA, 0.8, 1.2)
     );
 
-    const projectedSb = round2((seasonSb / seasonPa) * projectedPa);
+    const projectedSb =
+      isFallbackBatter && seasonPa === 0 ? 0 : round2((resolvedSeasonSb / seasonPa) * projectedPa);
 
     projections.push({
       player_id: batter.player_id,
