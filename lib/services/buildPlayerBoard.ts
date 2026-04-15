@@ -10,12 +10,25 @@ import {
   asTeamId,
   type PlayerPosition
 } from "@lib/contracts/types";
-import {
-  buildPlayerCards,
-  type BuildPlayerCardOptions,
-  type PlayerCard
-} from "./buildPlayerCard";
+import { buildPlayerCards, type BuildPlayerCardOptions } from "./buildPlayerCard";
 import type { LiveSlateSourceGame } from "./loadLiveSlate";
+import {
+  assembleGameProjection,
+  type AssembledGameProjection
+} from "@lib/projections/assembleGameProjection";
+import {
+  persistPlayerProjections,
+  type PersistPlayerProjectionsGameInput
+} from "./persistPlayerProjections";
+
+// Single temporary source of truth for the formula version used when writing
+// player projection rows. Must not be duplicated at call sites or in other
+// services. Not equivalent to game_projection.metadata.version.model_version.
+const PLAYER_PROJECTION_FORMULA_VERSION = "phase4-baseline-v1";
+
+// Single temporary source of truth for parameter set version.
+// Must not be duplicated at call sites or in other services.
+const PLAYER_PROJECTION_PARAMETER_SET_VERSION = "v1";
 
 export interface BuildPlayerBoardOptions {
   readonly source: string;
@@ -26,32 +39,41 @@ export interface BuildPlayerBoardOptions {
   readonly simulation?: BuildPlayerCardOptions["simulation"];
 }
 
+// ---------------------------------------------------------------------------
+// Internal per-game structure
+// ---------------------------------------------------------------------------
+
+interface AssembledSourceGame {
+  readonly sourceGame: LiveSlateSourceGame;
+  readonly assembledProjection: AssembledGameProjection;
+}
+
+// ---------------------------------------------------------------------------
+// Board row construction — delegates to buildPlayerCards owner path
+// ---------------------------------------------------------------------------
+
+const buildFallbackPosition = (card: {
+  deterministic_summary: { kind: string } | null;
+}): PlayerPosition => (card.deterministic_summary?.kind === "pitcher" ? "P" : "unknown");
+
 const buildMatchupLabel = (sourceGame: LiveSlateSourceGame): string =>
   `${sourceGame.canonicalGame.away.team.full_name} at ${sourceGame.canonicalGame.home.team.full_name}`;
 
-const buildFallbackPosition = (player: PlayerCard): PlayerPosition =>
-  player.deterministic_summary?.kind === "pitcher" ? "P" : "unknown";
-
-const buildProjection = (player: PlayerCard): PlayerBoardRow["projection"] => ({
-  deterministic_summary: player.deterministic_summary,
-  fantasy_summary: player.fantasy_summary,
-  simulation_summary: player.simulation_summary,
-  blocked: player.blocked
-});
-
-const buildPlayerBoardRows = (
+const buildPlayerBoardRowsForGame = (
   sourceGame: LiveSlateSourceGame,
+  assembledProjection: AssembledGameProjection,
   options: Pick<BuildPlayerBoardOptions, "simulation">
 ): readonly PlayerBoardRow[] => {
-  const playerCards = buildPlayerCards(sourceGame.preparedGame, {
-    ...(options.simulation ? { simulation: options.simulation } : {})
+  const { players } = buildPlayerCards(sourceGame.preparedGame, {
+    ...options,
+    assembled: assembledProjection
   });
   const matchup = buildMatchupLabel(sourceGame);
 
-  return playerCards.players
-    .map<PlayerBoardRow | null>((player) => {
-      const isAwayPlayer = player.team_id === sourceGame.canonicalGame.away.team.team_id;
-      const isHomePlayer = player.team_id === sourceGame.canonicalGame.home.team.team_id;
+  return players
+    .map<PlayerBoardRow | null>((card) => {
+      const isAwayPlayer = card.team_id === sourceGame.canonicalGame.away.team.team_id;
+      const isHomePlayer = card.team_id === sourceGame.canonicalGame.home.team.team_id;
 
       if (!isAwayPlayer && !isHomePlayer) {
         return null;
@@ -63,30 +85,39 @@ const buildPlayerBoardRows = (
       const opponent = isAwayPlayer
         ? sourceGame.canonicalGame.home.team
         : sourceGame.canonicalGame.away.team;
-      const identity = sourceGame.playerIdentities[player.player_id];
+      const identity = sourceGame.playerIdentities[card.player_id];
 
       return {
-        player_id: asPlayerId(player.player_id),
+        player_id: asPlayerId(card.player_id),
         full_name: identity?.full_name ?? null,
-        position: identity?.position ?? buildFallbackPosition(player),
+        position: identity?.position ?? buildFallbackPosition(card),
         batting_order: identity?.batting_order ?? null,
         team_side: isAwayPlayer ? "away" : "home",
-        team_id: asTeamId(player.team_id),
+        team_id: asTeamId(card.team_id),
         team_abbreviation: team.abbreviation,
         team_full_name: team.full_name,
         opponent_team_id: opponent.team_id,
         opponent_team_abbreviation: opponent.abbreviation,
         opponent_team_full_name: opponent.full_name,
-        game_id: asGameId(player.game_id),
+        game_id: asGameId(card.game_id),
         matchup,
         scheduled_start: sourceGame.canonicalGame.scheduled_start,
         status: sourceGame.canonicalGame.status,
         venue_name: sourceGame.canonicalGame.venue?.name ?? null,
-        projection: buildProjection(player)
+        projection: {
+          deterministic_summary: card.deterministic_summary,
+          fantasy_summary: card.fantasy_summary,
+          simulation_summary: card.simulation_summary,
+          blocked: card.blocked
+        }
       };
     })
     .filter((value): value is PlayerBoardRow => value !== null);
 };
+
+// ---------------------------------------------------------------------------
+// Sort helpers
+// ---------------------------------------------------------------------------
 
 const isPitcherRow = (player: PlayerBoardRow): boolean =>
   player.position === "P" || player.projection.deterministic_summary?.kind === "pitcher";
@@ -158,12 +189,47 @@ const sortPlayerRows = (left: PlayerBoardRow, right: PlayerBoardRow): number => 
   );
 };
 
-export const buildPlayerBoard = (
+// ---------------------------------------------------------------------------
+// Public export
+// ---------------------------------------------------------------------------
+
+export const buildPlayerBoard = async (
   sourceGames: readonly LiveSlateSourceGame[],
   options: BuildPlayerBoardOptions
-): PlayerBoardPayload => {
-  const players = sourceGames
-    .flatMap((sourceGame) => buildPlayerBoardRows(sourceGame, options))
+): Promise<PlayerBoardPayload> => {
+  const projectedAt = options.generated_at ?? new Date().toISOString();
+  const preparedInputLineageRef = `prepared-game-inputs:${options.date}`;
+  const teamRunLineageRef = `team-runs:${options.date}`;
+
+  const assembledSourceGames: AssembledSourceGame[] = sourceGames.map((sourceGame) => ({
+    sourceGame,
+    assembledProjection: assembleGameProjection(sourceGame.preparedGame)
+  }));
+
+  const persistenceGames: PersistPlayerProjectionsGameInput[] = assembledSourceGames.map(
+    ({ sourceGame, assembledProjection }) => ({
+      preparedGame: sourceGame.preparedGame,
+      assembledProjection
+    })
+  );
+
+  const persistResult = await persistPlayerProjections({
+    sourceGames: persistenceGames,
+    projectedAt,
+    playerProjectionFormulaVersion: PLAYER_PROJECTION_FORMULA_VERSION,
+    parameterSetVersion: PLAYER_PROJECTION_PARAMETER_SET_VERSION,
+    preparedInputLineageRef,
+    teamRunLineageRef
+  });
+
+  if (!persistResult.ok) {
+    throw persistResult.error;
+  }
+
+  const players = assembledSourceGames
+    .flatMap(({ sourceGame, assembledProjection }) =>
+      buildPlayerBoardRowsForGame(sourceGame, assembledProjection, options)
+    )
     .sort(sortPlayerRows);
 
   const pitchers = players.filter(isPitcherRow).length;
@@ -173,7 +239,7 @@ export const buildPlayerBoard = (
     source: options.source,
     mode: "player-board-v1",
     date: options.date,
-    generated_at: asISOTimestamp(options.generated_at ?? new Date().toISOString()),
+    generated_at: asISOTimestamp(projectedAt),
     summary: {
       total_players: players.length,
       projected_players: players.filter((player) => !player.projection.blocked.is_blocked)

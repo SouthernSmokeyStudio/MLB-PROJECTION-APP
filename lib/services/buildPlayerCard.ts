@@ -74,6 +74,8 @@ export interface BuildPlayerCardOptions {
   };
   /** Pre-indexed crosswalk for canonical_player_id resolution. When absent, all cards get null. */
   readonly crosswalk?: IndexedCrosswalk;
+  /** Caller-supplied assembled projection. When absent, assembleGameProjection is called internally. */
+  readonly assembled?: AssembledGameProjection;
 }
 
 type GenericRecord = Record<string, unknown>;
@@ -206,7 +208,7 @@ export const buildPlayerCards = (
   preparedInputs: PreparedGameInputs,
   options: BuildPlayerCardOptions = {}
 ): PlayerCardsResult => {
-  const assembled = assembleGameProjection(preparedInputs);
+  const assembled = options.assembled ?? assembleGameProjection(preparedInputs);
   const fantasy = projectFantasyPoints(assembled as never);
   const blocked = readBlockedState(preparedInputs, fantasy.blocked);
   const projectionLineage = createProjectionLineage({
