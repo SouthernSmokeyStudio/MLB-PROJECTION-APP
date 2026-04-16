@@ -48,6 +48,7 @@ export interface PreparedBatterInputs {
   readonly team_id: TeamId;
   readonly batting_order: number | null;
   readonly handedness: Handedness;
+  readonly lineup_status: "confirmed_order" | "season_stats_fallback";
   readonly season_pa: number | null;
   readonly season_avg: number | null;
   readonly season_obp: number | null;

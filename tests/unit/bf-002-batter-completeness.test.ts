@@ -75,6 +75,7 @@ const makeCompleteBatter = (
   team_id: asTeamId(teamId),
   batting_order: slot,
   handedness: "R",
+  lineup_status: "confirmed_order",
   season_pa: 500,
   season_avg: 0.270,
   season_obp: 0.340,

@@ -548,6 +548,7 @@ const buildPreparedBatters = (
       team_id: teamId,
       batting_order: battingOrder,
       handedness: "unknown",
+      lineup_status: "confirmed_order",
       season_pa: plateAppearances,
       season_avg: parseNumericString(batting.avg),
       season_obp: parseNumericString(batting.obp),
@@ -762,6 +763,96 @@ export const buildPreparedStarterFromPeopleStats = (
     vs_rhb_era: null,
     days_rest: null,
     last_start_pitches: null
+  };
+};
+
+export const fetchMlbStatsApiBatterSeasonStats = async (
+  numericPlayerId: number,
+  season: string
+): Promise<Result<unknown, string>> => {
+  const searchParams = new URLSearchParams({
+    stats: "season",
+    group: "hitting",
+    season,
+    gameType: "R"
+  });
+
+  const { response, error: fetchError } = await fetchWithTimeout(
+    `${MLB_STATS_API_PEOPLE_ENDPOINT}/${numericPlayerId}/stats?${searchParams.toString()}`,
+    { method: "GET", headers: { Accept: "application/json" }, cache: "no-store" }
+  );
+
+  if (!response) {
+    return err(`MLB Stats API batter season stats ${fetchError}`);
+  }
+
+  if (!response.ok) {
+    return err(`MLB Stats API batter season stats request failed with status ${response.status}`);
+  }
+
+  let payload: unknown;
+
+  try {
+    payload = await response.json();
+  } catch {
+    return err("MLB Stats API batter season stats response was not valid JSON");
+  }
+
+  if (!isRecord(payload)) {
+    return err("MLB Stats API batter season stats response must be an object");
+  }
+
+  const stats = Array.isArray(payload.stats) ? payload.stats : null;
+  const firstBlock = stats && stats.length > 0 ? readNullableRecord(stats[0]) : null;
+  const splits = firstBlock && Array.isArray(firstBlock.splits) ? firstBlock.splits : null;
+  const firstSplit = splits && splits.length > 0 ? readNullableRecord(splits[0]) : null;
+
+  if (!firstSplit || !readNullableRecord(firstSplit.stat)) {
+    return err(`MLB Stats API batter season stats for ${numericPlayerId} missing stat block`);
+  }
+
+  return ok(payload);
+};
+
+/**
+ * Overlay real season hitting stats from a MLB Stats API /people/{id}/stats
+ * payload onto a PreparedBatterInputs skeleton.
+ *
+ * Used to enrich projected-lineup batters who were admitted with null stats.
+ * Returns the skeleton batter unchanged when the payload cannot be parsed.
+ * Fields already non-null on the skeleton (e.g. player_id, team_id,
+ * batting_order, lineup_status) are always preserved.
+ */
+export const buildPreparedBatterFromPeopleStats = (
+  batter: PreparedBatterInputs,
+  payload: unknown
+): PreparedBatterInputs => {
+  const payloadRecord = readNullableRecord(payload);
+  const stats = payloadRecord && Array.isArray(payloadRecord.stats) ? payloadRecord.stats : null;
+  const firstBlock = stats && stats.length > 0 ? readNullableRecord(stats[0]) : null;
+  const splits = firstBlock && Array.isArray(firstBlock.splits) ? firstBlock.splits : null;
+  const firstSplit = splits && splits.length > 0 ? readNullableRecord(splits[0]) : null;
+  const stat = firstSplit ? readNullableRecord(firstSplit.stat) : null;
+
+  if (!stat) {
+    return batter;
+  }
+
+  return {
+    ...batter,
+    season_pa: parseIntegerLike(stat.plateAppearances),
+    season_avg: parseNumericString(stat.avg),
+    season_obp: parseNumericString(stat.obp),
+    season_slg: parseNumericString(stat.slg),
+    season_iso: (() => {
+      const avg = parseNumericString(stat.avg);
+      const slg = parseNumericString(stat.slg);
+      return avg === null || slg === null ? null : slg - avg;
+    })(),
+    season_k_rate: parseRate(stat.strikeOuts, stat.plateAppearances),
+    season_bb_rate: parseRate(stat.baseOnBalls, stat.plateAppearances),
+    season_hr_rate: parseRate(stat.homeRuns, stat.plateAppearances),
+    season_sb: parseIntegerLike(stat.stolenBases)
   };
 };
 

@@ -1,15 +1,18 @@
 import type { MlbStatsApiScheduleGame } from "@lib/adapters/contracts";
 import { fetchWithTimeout } from "@lib/adapters/fetchWithTimeout";
 import {
+  buildPreparedBatterFromPeopleStats,
   buildPreparedStarterFromPeopleStats,
   extractPreparedGameDataFromBoxscore,
   fetchAndParseMlbStatsApiSchedule,
   fetchMlbStatsApiBoxscore,
+  fetchMlbStatsApiBatterSeasonStats,
   fetchMlbStatsApiLinescore,
   fetchMlbStatsApiPitcherSeasonStats
 } from "@lib/adapters/mlbStatsApi";
 import type { CanonicalGame } from "@lib/contracts/canonical";
-import type { PreparedGameInputs } from "@lib/contracts/prepared";
+import type { MergedLineupEntry } from "@lib/contracts/merge-law";
+import type { PreparedBatterInputs, PreparedGameInputs } from "@lib/contracts/prepared";
 import {
   asPlayerId,
   err,
@@ -110,14 +113,56 @@ const parsePlayerPosition = (value: unknown): PlayerPosition => {
   }
 };
 
-const slugifyPlayerName = (value: string): string =>
+/**
+ * Translate a merged lineup entry into a PreparedBatterInputs skeleton.
+ *
+ * Used as a fallback when the boxscore has no batting-order data (pre-game).
+ * All per-player stat fields are null — only identity and batting-order are
+ * carried.  Handedness is unknown because projected lineup entries do not
+ * carry it; downstream wOBA math treats unknown-handedness as neutral.
+ */
+const buildProjectedBatterInputs = (entry: MergedLineupEntry): PreparedBatterInputs => ({
+  player_id: entry.player_id,
+  mlb_stats_api_id: null,
+  team_id: entry.team_id,
+  batting_order: entry.batting_order,
+  handedness: "unknown",
+  lineup_status: "confirmed_order",
+  season_pa: null,
+  season_avg: null,
+  season_obp: null,
+  season_slg: null,
+  season_woba: null,
+  season_iso: null,
+  season_k_rate: null,
+  season_bb_rate: null,
+  season_hr_rate: null,
+  season_sb: null,
+  recent_games_n: null,
+  recent_woba: null,
+  recent_avg: null,
+  vs_lhp_woba: null,
+  vs_rhp_woba: null
+});
+
+/**
+ * Normalize a player name to a URL-safe ASCII slug.
+ *
+ * NFD decomposition followed by combining-character removal strips
+ * diacritics before the ASCII-only character filter runs, so names like
+ * "Yordan Álvarez" produce "yordan-alvarez" — the same slug a projected-
+ * source provider emits from an ASCII-only name list.
+ */
+export const slugifyPlayerName = (value: string): string =>
   value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase()
     .trim()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "");
 
-const findBoxscorePlayerNumericId = (
+export const findBoxscorePlayerNumericId = (
   boxscore: unknown,
   side: "away" | "home",
   playerId: PlayerId | null
@@ -856,10 +901,50 @@ export const loadLiveSlate = async (
               )
             : null;
 
+        // Fall back to projected lineup entries when the boxscore has no
+        // batting-order data (pre-game state).  When the boxscore already
+        // carries batters, those always win — they are higher fidelity.
+        const awayBattersForEnrich =
+          extracted.data.away_batters.length > 0
+            ? extracted.data.away_batters
+            : (merged.away.lineup?.entries.map(buildProjectedBatterInputs) ?? []);
+        const homeBattersForEnrich =
+          extracted.data.home_batters.length > 0
+            ? extracted.data.home_batters
+            : (merged.home.lineup?.entries.map(buildProjectedBatterInputs) ?? []);
+
+        // Enrich projected-lineup batters (identified by null season_avg) with
+        // real season batting stats from the MLB Stats API.  Numeric player IDs
+        // are resolved from the pre-game boxscore roster, which carries player
+        // entries even before batting-order data exists.  Fails closed: batters
+        // whose IDs cannot be resolved or whose stat fetch fails remain as-is.
+        const enrichSide = async (
+          batters: readonly PreparedBatterInputs[],
+          side: "away" | "home"
+        ): Promise<readonly PreparedBatterInputs[]> => {
+          if (!batters.some(b => b.season_avg === null)) return batters;
+          return Promise.all(
+            batters.map(async b => {
+              if (b.season_avg !== null) return b;
+              const numericId = findBoxscorePlayerNumericId(fetchedBoxscore.data, side, b.player_id);
+              if (numericId === null) return b;
+              const result = await fetchMlbStatsApiBatterSeasonStats(numericId, season);
+              return result.success ? buildPreparedBatterFromPeopleStats(b, result.data) : b;
+            })
+          );
+        };
+
+        const [enrichedAwayBatters, enrichedHomeBatters] = await Promise.all([
+          enrichSide(awayBattersForEnrich, "away"),
+          enrichSide(homeBattersForEnrich, "home")
+        ]);
+
         const enrichedData: GamePreparationData = {
           ...extracted.data,
           away_starter: extracted.data.away_starter ?? awayStarterFromStats,
           home_starter: extracted.data.home_starter ?? homeStarterFromStats,
+          away_batters: enrichedAwayBatters,
+          home_batters: enrichedHomeBatters,
           ...(awaySeasonHitting.success
             ? { away_team_season_hitting: awaySeasonHitting.data }
             : {}),
