@@ -16,19 +16,6 @@ import {
   assembleGameProjection,
   type AssembledGameProjection
 } from "@lib/projections/assembleGameProjection";
-import {
-  persistPlayerProjections,
-  type PersistPlayerProjectionsGameInput
-} from "./persistPlayerProjections";
-
-// Single temporary source of truth for the formula version used when writing
-// player projection rows. Must not be duplicated at call sites or in other
-// services. Not equivalent to game_projection.metadata.version.model_version.
-const PLAYER_PROJECTION_FORMULA_VERSION = "phase4-baseline-v1";
-
-// Single temporary source of truth for parameter set version.
-// Must not be duplicated at call sites or in other services.
-const PLAYER_PROJECTION_PARAMETER_SET_VERSION = "v1";
 
 export interface BuildPlayerBoardOptions {
   readonly source: string;
@@ -40,7 +27,7 @@ export interface BuildPlayerBoardOptions {
 }
 
 // ---------------------------------------------------------------------------
-// Internal per-game structure
+// Internal per-game structure — persistence is caller responsibility
 // ---------------------------------------------------------------------------
 
 interface AssembledSourceGame {
@@ -193,38 +180,16 @@ const sortPlayerRows = (left: PlayerBoardRow, right: PlayerBoardRow): number => 
 // Public export
 // ---------------------------------------------------------------------------
 
-export const buildPlayerBoard = async (
+export const buildPlayerBoard = (
   sourceGames: readonly LiveSlateSourceGame[],
   options: BuildPlayerBoardOptions
-): Promise<PlayerBoardPayload> => {
+): PlayerBoardPayload => {
   const projectedAt = options.generated_at ?? new Date().toISOString();
-  const preparedInputLineageRef = `prepared-game-inputs:${options.date}`;
-  const teamRunLineageRef = `team-runs:${options.date}`;
 
   const assembledSourceGames: AssembledSourceGame[] = sourceGames.map((sourceGame) => ({
     sourceGame,
     assembledProjection: assembleGameProjection(sourceGame.preparedGame)
   }));
-
-  const persistenceGames: PersistPlayerProjectionsGameInput[] = assembledSourceGames.map(
-    ({ sourceGame, assembledProjection }) => ({
-      preparedGame: sourceGame.preparedGame,
-      assembledProjection
-    })
-  );
-
-  const persistResult = await persistPlayerProjections({
-    sourceGames: persistenceGames,
-    projectedAt,
-    playerProjectionFormulaVersion: PLAYER_PROJECTION_FORMULA_VERSION,
-    parameterSetVersion: PLAYER_PROJECTION_PARAMETER_SET_VERSION,
-    preparedInputLineageRef,
-    teamRunLineageRef
-  });
-
-  if (!persistResult.ok) {
-    throw persistResult.error;
-  }
 
   const players = assembledSourceGames
     .flatMap(({ sourceGame, assembledProjection }) =>
