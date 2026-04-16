@@ -105,6 +105,19 @@ export async function GET(request: NextRequest): Promise<Response> {
   const liveNote = loadedLiveSlate.success ? loadedLiveSlate.data.note : null;
   const mlbError = loadedLiveSlate.success ? null : loadedLiveSlate.error;
   const sourceGames = loadedLiveSlate.success ? loadedLiveSlate.data.games : [];
+
+  // True when at least one source game has a starter or batter — the minimum
+  // required for buildDfsEdgeBoard to produce any player rows at all.
+  // When false, entering DFS full-mode silently emits zero rows; block with
+  // an honest reason instead so the consumer knows why nothing published.
+  const hasProjectablePlayers = sourceGames.some(
+    (game) =>
+      game.preparedGame.away_starter !== null ||
+      game.preparedGame.home_starter !== null ||
+      game.preparedGame.away_batters.length > 0 ||
+      game.preparedGame.home_batters.length > 0
+  );
+
   const generatedAt = loadedLiveSlate.success
     ? loadedLiveSlate.data.generated_at
     : new Date().toISOString();
@@ -152,6 +165,12 @@ export async function GET(request: NextRequest): Promise<Response> {
                 dfsEdgeReason ??
                 "No DraftKings Classic salary captured for this date -- projections only."
             }
+          }
+        : !hasProjectablePlayers
+        ? {
+            dfs_edge_reason:
+              "Player projections unavailable -- DFS edge requires at least one projected starter or lineup." +
+              (projectedResult.note ? ` ${projectedResult.note}` : "")
           }
         : {
             dfs_edge: {

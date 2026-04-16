@@ -329,7 +329,7 @@ const buildRows = (
     )
   );
 
-  const slateGames =
+  const filteredSlateGames =
     selectedCompetitionGameKeys.size === 0
       ? sourceGames
       : sourceGames.filter((sourceGame) => {
@@ -342,6 +342,16 @@ const buildRows = (
 
           return selectedCompetitionGameKeys.has(gameKey);
         });
+
+  // If the competition-key filter has keys but eliminates all source games,
+  // DK and MLB Stats API abbreviations are diverging for this slate (e.g.
+  // franchise relocations, DK slug lag). Fall back to sourceGames so that
+  // buildRows still produces at minimum held rows rather than collapsing to
+  // zero. Players from non-scoped games are held via join-miss, not silenced.
+  const slateGames =
+    selectedCompetitionGameKeys.size > 0 && filteredSlateGames.length === 0
+      ? sourceGames
+      : filteredSlateGames;
 
   return slateGames.flatMap((sourceGame) => {
     const salaryJoinIdentities = buildSalaryJoinIdentities(sourceGame);
