@@ -66,6 +66,7 @@ const makeCompleteBatter = (
   mlb_stats_api_id: null,
   team_id: asTeamId(teamId),
   batting_order: slot,
+  lineup_status: "confirmed_order",
   handedness: "R",
   season_pa: 500,
   season_avg: 0.270,
