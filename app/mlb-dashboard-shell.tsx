@@ -587,14 +587,14 @@ const StatusRail = ({
     <div className="status-list-card">
       <div className="status-list-header">
         <span>Board Watch</span>
-        <span>First Six</span>
+        <span>All Games</span>
       </div>
       {liveScoreboardState.status === "loading" ? <div className="status-rail-note">Loading today&apos;s board.</div> : null}
       {liveScoreboardState.status === "error" ? <div className="status-rail-note error">The shell is live, but the live scoreboard could not load.</div> : null}
       {liveScoreboardState.status === "empty" ? <div className="status-rail-note">{liveScoreboardState.note ?? liveScoreboard?.note ?? "The feed is up, but there is no live scoreboard state on the board yet."}</div> : null}
       {liveScoreboardState.status === "success" && liveScoreboard ? (
-        <div className="status-list">
-          {liveScoreboard.games.slice(0, 6).map((game) => (
+        <div className="status-list" style={{ overflowY: "auto", maxHeight: "480px" }}>
+          {liveScoreboard.games.map((game) => (
             <div className={`status-list-row is-clickable ${game.blocked.is_blocked ? "rejected" : "approved"}`} key={game.game_id}>
               <button
                 aria-label={`Open game detail for ${game.away_team_abbreviation} at ${game.home_team_abbreviation}`}
@@ -1007,6 +1007,11 @@ const DfsEdgeCardGrid = ({ players }: { players: readonly DfsEdgeBoardPayload["r
               <div className="projection-chip-row">
                 <span className="signal-chip signal-chip-primary">{formatDraftKingsClassicSalary(player.draftkings_classic.salary)}</span>
                 <span className="signal-chip signal-chip-neutral">{formatDraftKingsClassicValue(player.draftkings_classic.value)}</span>
+                {player.draftkings_classic.projected_ownership !== null ? (
+                  <span className="signal-chip signal-chip-neutral">
+                    {`${(player.draftkings_classic.projected_ownership * 100).toFixed(1)}%${player.draftkings_classic.ownership_source === "placeholder" ? " est." : player.draftkings_classic.ownership_source === "model" ? " mdl" : ""} own`}
+                  </span>
+                ) : null}
               </div>
               <p className="player-card-note">{buildDfsEdgeNote(player)}</p>
               <p className="player-card-subnote">{buildDfsEdgeDetail(player)}</p>
@@ -1028,6 +1033,7 @@ const DfsEdgeCardGrid = ({ players }: { players: readonly DfsEdgeBoardPayload["r
 };
 
 const PlayerProjectionsWorkspace = ({ playerState, playerBoard }: { playerState: PlayerState; playerBoard: PlayerBoardPayload | null }) => {
+  const [playerSort, setPlayerSort] = useState<"all" | "highest" | "lowest" | "pitchers" | "batters">("all");
   const populationCopy = buildPlayerBoardPopulationCopy(playerBoard);
   const readyPitchers = getReadyPitchers(playerBoard);
   const readyBatters = getReadyBatters(playerBoard);
@@ -1084,58 +1090,133 @@ const PlayerProjectionsWorkspace = ({ playerState, playerBoard }: { playerState:
       ) : null}
 
       {playerState.status === "success" && playerBoard ? (
-        <div className="projection-board">
-          <div className="projection-board-title">Today&apos;s Player Board</div>
-          <div className="projection-summary-strip">
-            <span>{playerBoard.summary.total_players} players</span>
-            <span>{playerBoard.summary.projected_players} player-ready</span>
-            <span>{playerBoard.summary.blocked_players} held</span>
-            <span>{readyPitchers.length} pitchers</span>
-            <span>{readyBatters.length} bats</span>
-            <span>{playerBoard.summary.games_covered} games</span>
+        <>
+          <div className="board-controls">
+            <span className="board-controls-label">View</span>
+            {(["all", "pitchers", "batters", "highest", "lowest"] as const).map((s) => (
+              <button
+                key={s}
+                className={`board-control-btn ${playerSort === s ? "active" : ""}`}
+                type="button"
+                onClick={() => { setPlayerSort(s); }}
+              >
+                {s === "all" ? "All" : s === "pitchers" ? "Pitchers" : s === "batters" ? "Batters" : s === "highest" ? "Highest Pts" : "Lowest Pts"}
+              </button>
+            ))}
           </div>
-          <BoardPopulationNote copy={populationCopy} />
-          <div className="projection-match-list">
-            <div className="projection-roster-group">
-              <div className="projection-roster-header">
-                <strong>Pitchers</strong>
-                <span>{readyPitchers.length} ready</span>
-              </div>
-              {readyPitchers.length > 0 ? (
-                <PlayerCardGrid players={readyPitchers} />
-              ) : (
-                <p className="projection-roster-empty">No pitchers have cleared from today&apos;s projected matchups yet.</p>
-              )}
+          <div className="projection-board">
+            <div className="projection-board-title">Today&apos;s Player Board</div>
+            <div className="projection-summary-strip">
+              <span>{playerBoard.summary.total_players} players</span>
+              <span>{playerBoard.summary.projected_players} player-ready</span>
+              <span>{playerBoard.summary.blocked_players} held</span>
+              <span>{readyPitchers.length} pitchers</span>
+              <span>{readyBatters.length} bats</span>
+              <span>{playerBoard.summary.games_covered} games</span>
             </div>
-            <div className="projection-roster-group">
-              <div className="projection-roster-header">
-                <strong>Batters</strong>
-                <span>{readyBatters.length} ready</span>
-              </div>
-              {readyBatters.length > 0 ? (
-                <PlayerCardGrid players={readyBatters} />
-              ) : (
-                <p className="projection-roster-empty">No batters have cleared from today&apos;s projected matchups yet.</p>
-              )}
-            </div>
-            {heldPlayers.length > 0 ? (
-              <div className="projection-roster-group held">
-                <div className="projection-roster-header">
-                  <strong>Held</strong>
-                  <span>{heldPlayers.length} waiting on projection</span>
+            <BoardPopulationNote copy={populationCopy} />
+            <div className="projection-match-list">
+              {playerSort === "all" ? (
+                <>
+                  <div className="projection-roster-group">
+                    <div className="projection-roster-header">
+                      <strong>Pitchers</strong>
+                      <span>{readyPitchers.length} ready</span>
+                    </div>
+                    {readyPitchers.length > 0 ? (
+                      <PlayerCardGrid players={readyPitchers} />
+                    ) : (
+                      <p className="projection-roster-empty">No pitchers have cleared from today&apos;s projected matchups yet.</p>
+                    )}
+                  </div>
+                  <div className="projection-roster-group">
+                    <div className="projection-roster-header">
+                      <strong>Batters</strong>
+                      <span>{readyBatters.length} ready</span>
+                    </div>
+                    {readyBatters.length > 0 ? (
+                      <PlayerCardGrid players={readyBatters} />
+                    ) : (
+                      <p className="projection-roster-empty">No batters have cleared from today&apos;s projected matchups yet.</p>
+                    )}
+                  </div>
+                  {heldPlayers.length > 0 ? (
+                    <div className="projection-roster-group held">
+                      <div className="projection-roster-header">
+                        <strong>Held</strong>
+                        <span>{heldPlayers.length} waiting on projection</span>
+                      </div>
+                      <PlayerCardGrid players={heldPlayers} />
+                    </div>
+                  ) : null}
+                </>
+              ) : playerSort === "pitchers" ? (
+                <div className="projection-roster-group">
+                  <div className="projection-roster-header">
+                    <strong>Pitchers</strong>
+                    <span>{readyPitchers.length} ready</span>
+                  </div>
+                  {readyPitchers.length > 0 ? (
+                    <PlayerCardGrid players={readyPitchers} />
+                  ) : (
+                    <p className="projection-roster-empty">No pitchers have cleared from today&apos;s projected matchups yet.</p>
+                  )}
                 </div>
-                <PlayerCardGrid players={heldPlayers} />
-              </div>
-            ) : null}
+              ) : playerSort === "batters" ? (
+                <div className="projection-roster-group">
+                  <div className="projection-roster-header">
+                    <strong>Batters</strong>
+                    <span>{readyBatters.length} ready</span>
+                  </div>
+                  {readyBatters.length > 0 ? (
+                    <PlayerCardGrid players={readyBatters} />
+                  ) : (
+                    <p className="projection-roster-empty">No batters have cleared from today&apos;s projected matchups yet.</p>
+                  )}
+                </div>
+              ) : (
+                // highest or lowest — flat sorted list of all ready players
+                <div className="projection-roster-group">
+                  <div className="projection-roster-header">
+                    <strong>{playerSort === "highest" ? "Highest Points" : "Lowest Points"}</strong>
+                    <span>{readyPitchers.length + readyBatters.length} ready</span>
+                  </div>
+                  {readyPitchers.length + readyBatters.length > 0 ? (
+                    <PlayerCardGrid
+                      players={[...readyPitchers, ...readyBatters].sort((a, b) => {
+                        const apts = getPlayerProjectedPoints(a) ?? (playerSort === "highest" ? -Infinity : Infinity);
+                        const bpts = getPlayerProjectedPoints(b) ?? (playerSort === "highest" ? -Infinity : Infinity);
+                        return playerSort === "highest" ? bpts - apts : apts - bpts;
+                      })}
+                    />
+                  ) : (
+                    <p className="projection-roster-empty">No ready players on today&apos;s board yet.</p>
+                  )}
+                </div>
+              )}
+            </div>
           </div>
-        </div>
+        </>
       ) : null}
     </section>
   );
 };
 
 const DfsEdgeWorkspace = ({ dfsState, dfsBoard }: { dfsState: DfsState; dfsBoard: DfsEdgeBoardPayload | null }) => {
+  const [dfsSort, setDfsSort] = useState<"default" | "value" | "points" | "salary">("default");
   const populationCopy = buildDfsBoardPopulationCopy(dfsBoard);
+
+  const sortDfsPlayers = (
+    players: readonly DfsEdgeBoardPayload["ready_pitchers"][number][]
+  ): readonly DfsEdgeBoardPayload["ready_pitchers"][number][] => {
+    if (dfsSort === "default") return players;
+    return [...players].sort((a, b) => {
+      if (dfsSort === "value") return (b.draftkings_classic.value ?? -1) - (a.draftkings_classic.value ?? -1);
+      if (dfsSort === "points") return (b.projection.fantasy_summary?.projected_points ?? -1) - (a.projection.fantasy_summary?.projected_points ?? -1);
+      if (dfsSort === "salary") return (b.draftkings_classic.salary ?? -1) - (a.draftkings_classic.salary ?? -1);
+      return 0;
+    });
+  };
 
   return (
     <section className="workspace-panel" role="tabpanel" aria-labelledby="tab-dfs-edge">
@@ -1185,51 +1266,66 @@ const DfsEdgeWorkspace = ({ dfsState, dfsBoard }: { dfsState: DfsState; dfsBoard
       ) : null}
 
       {dfsState.status === "success" && dfsBoard ? (
-        <div className="projection-board">
-          <div className="projection-board-title">DraftKings Classic Board</div>
-          <div className="projection-summary-strip">
-            <span>{dfsBoard.summary.ready_players} DraftKings-ready</span>
-            <span>{dfsBoard.summary.held_players} held</span>
-            <span>{dfsBoard.summary.ready_pitchers} pitchers</span>
-            <span>{dfsBoard.summary.ready_batters} bats</span>
-            <span>{dfsBoard.summary.average_ready_salary === null ? "No avg salary" : `Avg salary ${formatDraftKingsClassicSalary(Math.round(dfsBoard.summary.average_ready_salary))}`}</span>
-            <span>{dfsBoard.summary.average_ready_value === null ? "No avg value" : `Avg value ${formatDraftKingsClassicValue(dfsBoard.summary.average_ready_value)}`}</span>
+        <>
+          <div className="board-controls">
+            <span className="board-controls-label">Sort</span>
+            {(["default", "value", "points", "salary"] as const).map((s) => (
+              <button
+                key={s}
+                className={`board-control-btn ${dfsSort === s ? "active" : ""}`}
+                type="button"
+                onClick={() => { setDfsSort(s); }}
+              >
+                {s === "default" ? "Default" : s === "value" ? "By Value" : s === "points" ? "By Points" : "By Salary"}
+              </button>
+            ))}
           </div>
-          <BoardPopulationNote copy={populationCopy} />
-          <div className="projection-match-list">
-            <div className="projection-roster-group">
-              <div className="projection-roster-header">
-                <strong>Pitchers</strong>
-                <span>{dfsBoard.summary.ready_pitchers} DraftKings-ready</span>
-              </div>
-              {dfsBoard.ready_pitchers.length > 0 ? (
-                <DfsEdgeCardGrid players={dfsBoard.ready_pitchers} />
-              ) : (
-                <p className="projection-roster-empty">No pitchers have both a projection and a DraftKings Classic salary yet.</p>
-              )}
+          <div className="projection-board">
+            <div className="projection-board-title">DraftKings Classic Board</div>
+            <div className="projection-summary-strip">
+              <span>{dfsBoard.summary.ready_players} DraftKings-ready</span>
+              <span>{dfsBoard.summary.held_players} held</span>
+              <span>{dfsBoard.summary.ready_pitchers} pitchers</span>
+              <span>{dfsBoard.summary.ready_batters} bats</span>
+              <span>{dfsBoard.summary.average_ready_salary === null ? "No avg salary" : `Avg salary ${formatDraftKingsClassicSalary(Math.round(dfsBoard.summary.average_ready_salary))}`}</span>
+              <span>{dfsBoard.summary.average_ready_value === null ? "No avg value" : `Avg value ${formatDraftKingsClassicValue(dfsBoard.summary.average_ready_value)}`}</span>
             </div>
-            <div className="projection-roster-group">
-              <div className="projection-roster-header">
-                <strong>Batters</strong>
-                <span>{dfsBoard.summary.ready_batters} DraftKings-ready</span>
-              </div>
-              {dfsBoard.ready_batters.length > 0 ? (
-                <DfsEdgeCardGrid players={dfsBoard.ready_batters} />
-              ) : (
-                <p className="projection-roster-empty">No batters have both a projection and a DraftKings Classic salary yet.</p>
-              )}
-            </div>
-            {dfsBoard.held_players.length > 0 ? (
-              <div className="projection-roster-group held">
+            <BoardPopulationNote copy={populationCopy} />
+            <div className="projection-match-list">
+              <div className="projection-roster-group">
                 <div className="projection-roster-header">
-                  <strong>Held</strong>
-                  <span>{dfsBoard.held_players.length} waiting on DraftKings Classic salary</span>
+                  <strong>Pitchers</strong>
+                  <span>{dfsBoard.summary.ready_pitchers} DraftKings-ready</span>
                 </div>
-                <DfsEdgeCardGrid players={dfsBoard.held_players} />
+                {dfsBoard.ready_pitchers.length > 0 ? (
+                  <DfsEdgeCardGrid players={sortDfsPlayers(dfsBoard.ready_pitchers)} />
+                ) : (
+                  <p className="projection-roster-empty">No pitchers have both a projection and a DraftKings Classic salary yet.</p>
+                )}
               </div>
-            ) : null}
+              <div className="projection-roster-group">
+                <div className="projection-roster-header">
+                  <strong>Batters</strong>
+                  <span>{dfsBoard.summary.ready_batters} DraftKings-ready</span>
+                </div>
+                {dfsBoard.ready_batters.length > 0 ? (
+                  <DfsEdgeCardGrid players={sortDfsPlayers(dfsBoard.ready_batters)} />
+                ) : (
+                  <p className="projection-roster-empty">No batters have both a projection and a DraftKings Classic salary yet.</p>
+                )}
+              </div>
+              {dfsBoard.held_players.length > 0 ? (
+                <div className="projection-roster-group held">
+                  <div className="projection-roster-header">
+                    <strong>Held</strong>
+                    <span>{dfsBoard.held_players.length} waiting on DraftKings Classic salary</span>
+                  </div>
+                  <DfsEdgeCardGrid players={dfsBoard.held_players} />
+                </div>
+              ) : null}
+            </div>
           </div>
-        </div>
+        </>
       ) : null}
     </section>
   );
@@ -1313,7 +1409,23 @@ const BettingEdgeMatchList = ({ games }: { games: readonly BettingEdgeBoardPaylo
 );
 
 const BettingEdgeWorkspace = ({ bettingState, bettingBoard }: { bettingState: BettingState; bettingBoard: BettingEdgeBoardPayload | null }) => {
+  const [bettingSort, setBettingSort] = useState<"default" | "edge" | "start">("default");
   const populationCopy = buildBettingBoardPopulationCopy(bettingBoard);
+
+  const sortBettingGames = (
+    games: readonly BettingEdgeBoardPayload["ready_games"][number][]
+  ): readonly BettingEdgeBoardPayload["ready_games"][number][] => {
+    if (bettingSort === "default") return games;
+    return [...games].sort((a, b) => {
+      if (bettingSort === "edge") {
+        const aLeader = getBettingEdgeLeader(a);
+        const bLeader = getBettingEdgeLeader(b);
+        return (bLeader.edge ?? -Infinity) - (aLeader.edge ?? -Infinity);
+      }
+      if (bettingSort === "start") return a.scheduled_start.localeCompare(b.scheduled_start);
+      return 0;
+    });
+  };
 
   return (
     <section className="workspace-panel" role="tabpanel" aria-labelledby="tab-betting-edge">
@@ -1365,40 +1477,55 @@ const BettingEdgeWorkspace = ({ bettingState, bettingBoard }: { bettingState: Be
       ) : null}
 
       {bettingState.status === "success" && bettingBoard ? (
-        <div className="projection-board">
-          <div className="projection-board-title">DraftKings Sportsbook Moneyline Board</div>
-          <div className="projection-summary-strip">
-            <span>{bettingBoard.summary.ready_games} moneyline-ready</span>
-            <span>{bettingBoard.summary.held_games} held</span>
-            <span>{bettingBoard.counts.matched_markets} matched markets</span>
-            <span>{bettingBoard.summary.average_ready_edge === null ? "No ready average" : `Avg ${formatBettingEdgePercent(bettingBoard.summary.average_ready_edge)}`}</span>
-            <span>{bettingBoard.summary.top_edge_side ? `${bettingBoard.summary.top_edge_side.team_abbreviation} ${formatAmericanOdds(bettingBoard.summary.top_edge_side.market_odds_american)}` : "No top side yet"}</span>
+        <>
+          <div className="board-controls">
+            <span className="board-controls-label">Sort</span>
+            {(["default", "edge", "start"] as const).map((s) => (
+              <button
+                key={s}
+                className={`board-control-btn ${bettingSort === s ? "active" : ""}`}
+                type="button"
+                onClick={() => { setBettingSort(s); }}
+              >
+                {s === "default" ? "Default" : s === "edge" ? "Highest Edge" : "Earliest Game"}
+              </button>
+            ))}
           </div>
-          <BoardPopulationNote copy={populationCopy} />
-          <div className="projection-match-list">
-            <div className="projection-roster-group">
-              <div className="projection-roster-header">
-                <strong>Moneyline-ready</strong>
-                <span>{bettingBoard.summary.ready_games} ready</span>
-              </div>
-              {bettingBoard.ready_games.length > 0 ? (
-                <BettingEdgeMatchList games={bettingBoard.ready_games} />
-              ) : (
-                <p className="projection-roster-empty">No projected matchup has a live DraftKings Sportsbook pregame moneyline yet.</p>
-              )}
+          <div className="projection-board">
+            <div className="projection-board-title">DraftKings Sportsbook Moneyline Board</div>
+            <div className="projection-summary-strip">
+              <span>{bettingBoard.summary.ready_games} moneyline-ready</span>
+              <span>{bettingBoard.summary.held_games} held</span>
+              <span>{bettingBoard.counts.matched_markets} matched markets</span>
+              <span>{bettingBoard.summary.average_ready_edge === null ? "No ready average" : `Avg ${formatBettingEdgePercent(bettingBoard.summary.average_ready_edge)}`}</span>
+              <span>{bettingBoard.summary.top_edge_side ? `${bettingBoard.summary.top_edge_side.team_abbreviation} ${formatAmericanOdds(bettingBoard.summary.top_edge_side.market_odds_american)}` : "No top side yet"}</span>
             </div>
-
-            {bettingBoard.held_games.length > 0 ? (
-              <div className="projection-roster-group held">
+            <BoardPopulationNote copy={populationCopy} />
+            <div className="projection-match-list">
+              <div className="projection-roster-group">
                 <div className="projection-roster-header">
-                  <strong>Held</strong>
-                  <span>{bettingBoard.held_games.length} waiting on DraftKings Sportsbook moneyline</span>
+                  <strong>Moneyline-ready</strong>
+                  <span>{bettingBoard.summary.ready_games} ready</span>
                 </div>
-                <BettingEdgeMatchList games={bettingBoard.held_games} />
+                {bettingBoard.ready_games.length > 0 ? (
+                  <BettingEdgeMatchList games={sortBettingGames(bettingBoard.ready_games)} />
+                ) : (
+                  <p className="projection-roster-empty">No projected matchup has a live DraftKings Sportsbook pregame moneyline yet.</p>
+                )}
               </div>
-            ) : null}
+
+              {bettingBoard.held_games.length > 0 ? (
+                <div className="projection-roster-group held">
+                  <div className="projection-roster-header">
+                    <strong>Held</strong>
+                    <span>{bettingBoard.held_games.length} waiting on DraftKings Sportsbook moneyline</span>
+                  </div>
+                  <BettingEdgeMatchList games={bettingBoard.held_games} />
+                </div>
+              ) : null}
+            </div>
           </div>
-        </div>
+        </>
       ) : null}
     </section>
   );

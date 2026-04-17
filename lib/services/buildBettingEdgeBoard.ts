@@ -237,11 +237,13 @@ const getTopSide = (
   const awayEdge = game.draftkings_sportsbook_moneyline.away.edge;
   const homeEdge = game.draftkings_sportsbook_moneyline.home.edge;
 
+  // compareNullableNumbersDesc returns homeEdge - awayEdge for non-null values.
+  // <= 0 means awayEdge >= homeEdge → away has the higher (or equal) edge.
   if (compareNullableNumbersDesc(awayEdge, homeEdge) <= 0) {
-    return game.draftkings_sportsbook_moneyline.home;
+    return game.draftkings_sportsbook_moneyline.away;
   }
 
-  return game.draftkings_sportsbook_moneyline.away;
+  return game.draftkings_sportsbook_moneyline.home;
 };
 
 const buildTopEdgeSide = (game: BettingEdgeBoardRow): BettingEdgeBoardTopSide | null => {
