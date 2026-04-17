@@ -3,7 +3,7 @@ import { dirname, join } from "node:path";
 import { fetchDraftKingsSportsbookMlbMoneylineSlate } from "@lib/adapters/draftKingsSportsbook";
 import type { DraftKingsSportsbookMlbMoneylineSlate } from "@lib/contracts/draftkings-sportsbook-mlb-moneyline";
 import { asISOTimestamp, err, ok, type Result } from "@lib/contracts/types";
-import { getDateInScheduleTimezone } from "@lib/materializer/schedule";
+import { getDateInScheduleTimezone, MATERIALIZATION_TIMEZONE } from "@lib/materializer/schedule";
 
 const PERSISTED_VERSION = 1 as const;
 const DEFAULT_ARTIFACT_DIR = join(process.cwd(), "data", "draftkings-sportsbook-moneyline");
@@ -32,6 +32,20 @@ interface PersistedSportsbookMoneylineArtifact {
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
+
+/**
+ * Convert a UTC ISO timestamp to a YYYY-MM-DD date string in the authoritative
+ * schedule timezone (America/Chicago / Central Time).  Night games on the
+ * 2026-04-17 Central slate can have UTC timestamps of 2026-04-18T00:xx:00Z;
+ * UTC-slice filtering would exclude them — this corrects that.
+ */
+const toScheduleTimezoneDate = (isoTimestamp: string): string =>
+  new Intl.DateTimeFormat("en-CA", {
+    timeZone: MATERIALIZATION_TIMEZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit"
+  }).format(new Date(isoTimestamp));
 
 const getArtifactPath = (date: string, artifactDir: string): string =>
   join(artifactDir, `${date}.json`);
@@ -135,7 +149,7 @@ export const captureSportsbookMlbMoneylineSlate = async ({
   }
 
   const filteredEntries = fetched.data.entries.filter(
-    (entry) => entry.start_time.slice(0, 10) === date
+    (entry) => toScheduleTimezoneDate(entry.start_time) === date
   );
 
   if (filteredEntries.length === 0) {
@@ -183,7 +197,7 @@ export const loadDraftKingsSportsbookMlbMoneylineSlate = async ({
   }
 
   const filteredEntries = fetched.data.entries.filter(
-    (entry) => entry.start_time.slice(0, 10) === date
+    (entry) => toScheduleTimezoneDate(entry.start_time) === date
   );
 
   if (filteredEntries.length === 0) {
