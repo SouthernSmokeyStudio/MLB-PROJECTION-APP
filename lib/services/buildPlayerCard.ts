@@ -237,6 +237,24 @@ export const buildPlayerCards = (
     }
   }
 
+  // Attach mlb_stats_api_id from prepared batter inputs for DFS salary join.
+  // Mirrors the pitcher propagation above.  Only patches cards that do not
+  // already carry a numeric id (pitchers are already patched above).
+  const batterMlbIds = new Map<string, string>();
+  for (const batter of [...preparedInputs.away_batters, ...preparedInputs.home_batters]) {
+    if (batter.mlb_stats_api_id) {
+      batterMlbIds.set(batter.player_id, batter.mlb_stats_api_id);
+    }
+  }
+  for (const [playerId, card] of deterministicPlayers) {
+    if (!card.mlb_stats_api_id) {
+      const mlbId = batterMlbIds.get(playerId);
+      if (mlbId) {
+        deterministicPlayers.set(playerId, { ...card, mlb_stats_api_id: mlbId });
+      }
+    }
+  }
+
   const simulations = fantasy.blocked.is_blocked
     ? null
     : simulateFantasy(fantasy, options.simulation);

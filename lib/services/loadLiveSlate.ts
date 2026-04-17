@@ -929,7 +929,7 @@ export const loadLiveSlate = async (
               const numericId = findBoxscorePlayerNumericId(fetchedBoxscore.data, side, b.player_id);
               if (numericId === null) return b;
               const result = await fetchMlbStatsApiBatterSeasonStats(numericId, season);
-              return result.success ? buildPreparedBatterFromPeopleStats(b, result.data) : b;
+              return result.success ? buildPreparedBatterFromPeopleStats(b, result.data, numericId) : b;
             })
           );
         };

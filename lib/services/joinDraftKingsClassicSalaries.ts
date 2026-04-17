@@ -180,9 +180,9 @@ const matchSalaryByNameAndTeam = (
   >
 ): DraftKingsClassicSalarySlate["salaries"][number] | null => {
   const identity = salaryJoinIdentities?.[player.player_id];
-  const playerName = identity?.full_name ?? (salaryJoinIdentities ? null : player.player_id);
+  const playerName = identity?.full_name ?? player.player_id;
   const teamAbbreviation =
-    identity?.team_abbreviation ?? (salaryJoinIdentities ? null : player.team_id.toUpperCase());
+    identity?.team_abbreviation ?? player.team_id.toUpperCase();
 
   if (!playerName || !teamAbbreviation) {
     return null;

@@ -825,7 +825,8 @@ export const fetchMlbStatsApiBatterSeasonStats = async (
  */
 export const buildPreparedBatterFromPeopleStats = (
   batter: PreparedBatterInputs,
-  payload: unknown
+  payload: unknown,
+  numericPlayerId?: number
 ): PreparedBatterInputs => {
   const payloadRecord = readNullableRecord(payload);
   const stats = payloadRecord && Array.isArray(payloadRecord.stats) ? payloadRecord.stats : null;
@@ -840,6 +841,7 @@ export const buildPreparedBatterFromPeopleStats = (
 
   return {
     ...batter,
+    mlb_stats_api_id: numericPlayerId !== undefined ? String(numericPlayerId) : batter.mlb_stats_api_id,
     season_pa: parseIntegerLike(stat.plateAppearances),
     season_avg: parseNumericString(stat.avg),
     season_obp: parseNumericString(stat.obp),
