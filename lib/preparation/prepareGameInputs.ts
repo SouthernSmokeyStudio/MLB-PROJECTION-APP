@@ -5,7 +5,8 @@ import type {
   PreparedPitcherInputs,
   PreparedTeamInputs
 } from "@lib/contracts/prepared";
-import { asISOTimestamp, type ISOTimestamp } from "@lib/contracts/types";
+import { asISOTimestamp, asPlayerId, type ISOTimestamp } from "@lib/contracts/types";
+import { BASE_LEAGUE_ERA } from "@lib/projections/projectTeamRuns";
 
 export interface GamePreparationData {
   readonly prepared_at: ISOTimestamp;
@@ -161,21 +162,63 @@ const enrichTeamInputs = (
   };
 };
 
+/**
+ * Build a PreparedPitcherInputs that covers both allowed fallback classes:
+ *
+ *   Class 1 — known probable pitcher with no 2026 regular-season stat split.
+ *             probablePitcher is non-null; season_era falls back to BASE_LEAGUE_ERA.
+ *
+ *   Class 2 — probable pitcher is null / starter TBD.
+ *             A TBD placeholder is returned; pitcher_identity_known = false.
+ *
+ * In both cases season_era = BASE_LEAGUE_ERA so projectTeamRuns can run.
+ * All other per-start fields remain null — only team-offense baselines, bullpen
+ * baselines, and venue drive the projection when the fallback is active.
+ *
+ * First-loss boundary: loadLiveSlate passes null for away_starter / home_starter
+ * in enrichedData when the live stats fetch returns no 2026 split or when no
+ * probable pitcher is announced.  prepareGameInputs then calls this function.
+ */
 const buildFallbackPitcherInputs = (
   probablePitcher: CanonicalGame["away"]["probable_pitcher"],
   teamId: PreparedTeamInputs["team_id"]
-): PreparedPitcherInputs | null => {
+): PreparedPitcherInputs => {
   if (!probablePitcher) {
-    return null;
+    // Class 2 — starter TBD / not announced.
+    return {
+      player_id: asPlayerId(`tbd-${teamId}`),
+      mlb_stats_api_id: null,
+      team_id: teamId,
+      handedness: "unknown",
+      season_ip: null,
+      season_era: BASE_LEAGUE_ERA,
+      season_whip: null,
+      season_k_per_9: null,
+      season_bb_per_9: null,
+      season_hr_per_9: null,
+      recent_starts_n: null,
+      recent_era: null,
+      recent_k_per_9: null,
+      recent_ip_per_start: null,
+      vs_lhb_era: null,
+      vs_rhb_era: null,
+      days_rest: null,
+      last_start_pitches: null,
+      baseline_source: "league_average_fallback",
+      pitcher_identity_known: false,
+      fallback_reason: "probable_pitcher_tbd",
+      fallback_used: true
+    };
   }
 
+  // Class 1 — known pitcher, no 2026 regular-season stat split available.
   return {
     player_id: probablePitcher.player_id,
     mlb_stats_api_id: probablePitcher.mlb_stats_api_id,
     team_id: teamId,
     handedness: probablePitcher.handedness,
     season_ip: null,
-    season_era: null,
+    season_era: BASE_LEAGUE_ERA,
     season_whip: null,
     season_k_per_9: null,
     season_bb_per_9: null,
@@ -187,7 +230,11 @@ const buildFallbackPitcherInputs = (
     vs_lhb_era: null,
     vs_rhb_era: null,
     days_rest: null,
-    last_start_pitches: null
+    last_start_pitches: null,
+    baseline_source: "league_average_fallback",
+    pitcher_identity_known: true,
+    fallback_reason: "pitcher_no_2026_stats",
+    fallback_used: true
   };
 };
 
@@ -312,14 +359,6 @@ export const prepareGameInputs = (
 
   if (homeTeam.team_id !== game.home.team.team_id) {
     reasons.push("home_team team_id does not match canonical game");
-  }
-
-  if (!awayStarter) {
-    reasons.push("Missing away_starter preparation data");
-  }
-
-  if (!homeStarter) {
-    reasons.push("Missing home_starter preparation data");
   }
 
   if (

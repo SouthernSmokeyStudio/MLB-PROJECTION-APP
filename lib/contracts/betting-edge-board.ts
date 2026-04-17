@@ -58,6 +58,15 @@ export interface BettingEdgeBoardProjection {
   readonly projected_total: number | null;
   readonly away_win_probability: number | null;
   readonly home_win_probability: number | null;
+  /** Pitcher provenance — null when no starter is attached to the row. */
+  readonly away_pitcher_baseline_source: "season_stats" | "league_average_fallback" | null;
+  readonly home_pitcher_baseline_source: "season_stats" | "league_average_fallback" | null;
+  readonly away_pitcher_identity_known: boolean | null;
+  readonly home_pitcher_identity_known: boolean | null;
+  readonly away_pitcher_fallback_reason: "pitcher_no_2026_stats" | "probable_pitcher_tbd" | null;
+  readonly home_pitcher_fallback_reason: "pitcher_no_2026_stats" | "probable_pitcher_tbd" | null;
+  readonly away_pitcher_fallback_used: boolean | null;
+  readonly home_pitcher_fallback_used: boolean | null;
 }
 
 export interface BettingEdgeBoardRow {
@@ -96,4 +105,8 @@ export interface BettingEdgeBoardPayload {
   readonly ready_games: readonly BettingEdgeBoardRow[];
   readonly held_games: readonly BettingEdgeBoardRow[];
   readonly note: string | null;
+  /** Proof output: number of games where ≥1 starter used the league-average ERA fallback. */
+  readonly pitcher_fallback_count: number;
+  /** Proof output: game IDs where the league-average ERA fallback was applied. */
+  readonly pitcher_fallback_game_ids: readonly GameId[];
 }

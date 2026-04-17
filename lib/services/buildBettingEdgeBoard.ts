@@ -6,7 +6,7 @@ import type {
   BettingEdgeBoardTopSide
 } from "@lib/contracts/betting-edge-board";
 import type { DraftKingsSportsbookMlbMoneylineSlate } from "@lib/contracts/draftkings-sportsbook-mlb-moneyline";
-import { asGameId, asISOTimestamp } from "@lib/contracts/types";
+import { asGameId, asISOTimestamp, type GameId } from "@lib/contracts/types";
 import type { TwoWayMarketEdge } from "@lib/market/edge";
 import { buildGameCard } from "./buildGameCard";
 import {
@@ -64,6 +64,16 @@ const buildMoneylineSide = ({
   fair_american_odds: edge?.fair_american_odds ?? null
 });
 
+const readPitcherBaselineSource = (
+  starter: LiveSlateSourceGame["preparedGame"]["away_starter"]
+): "season_stats" | "league_average_fallback" | null =>
+  starter?.baseline_source ?? null;
+
+const readPitcherFallbackReason = (
+  starter: LiveSlateSourceGame["preparedGame"]["away_starter"]
+): "pitcher_no_2026_stats" | "probable_pitcher_tbd" | null =>
+  starter?.fallback_reason ?? null;
+
 const toBettingEdgeBoardRow = ({
   sourceGame,
   game
@@ -74,6 +84,8 @@ const toBettingEdgeBoardRow = ({
   const awayMoneyline = game.market?.moneyline?.away ?? null;
   const homeMoneyline = game.market?.moneyline?.home ?? null;
   const matchup = buildMatchupLabel(sourceGame);
+  const awayStarter = sourceGame.preparedGame.away_starter;
+  const homeStarter = sourceGame.preparedGame.home_starter;
 
   return {
     game_id: asGameId(game.game_id),
@@ -91,7 +103,15 @@ const toBettingEdgeBoardRow = ({
       projected_home_runs: game.deterministic.projected_home_runs,
       projected_total: game.deterministic.projected_total,
       away_win_probability: game.simulation?.away_win_probability ?? null,
-      home_win_probability: game.simulation?.home_win_probability ?? null
+      home_win_probability: game.simulation?.home_win_probability ?? null,
+      away_pitcher_baseline_source: readPitcherBaselineSource(awayStarter),
+      home_pitcher_baseline_source: readPitcherBaselineSource(homeStarter),
+      away_pitcher_identity_known: awayStarter?.pitcher_identity_known ?? null,
+      home_pitcher_identity_known: homeStarter?.pitcher_identity_known ?? null,
+      away_pitcher_fallback_reason: readPitcherFallbackReason(awayStarter),
+      home_pitcher_fallback_reason: readPitcherFallbackReason(homeStarter),
+      away_pitcher_fallback_used: awayStarter?.fallback_used ?? null,
+      home_pitcher_fallback_used: homeStarter?.fallback_used ?? null
     },
     draftkings_sportsbook_moneyline: {
       provider: game.draftkings_sportsbook_moneyline.provider,
@@ -143,6 +163,8 @@ const buildDegradedBettingRow = (
   const gameCard = buildGameCard(sourceGame.preparedGame, {
     ...(simulation ? { simulation } : {})
   });
+  const awayStarter = sourceGame.preparedGame.away_starter;
+  const homeStarter = sourceGame.preparedGame.home_starter;
 
   return {
     game_id: asGameId(gameCard.game_id),
@@ -160,7 +182,15 @@ const buildDegradedBettingRow = (
       projected_home_runs: gameCard.deterministic.projected_home_runs,
       projected_total: gameCard.deterministic.projected_total,
       away_win_probability: gameCard.simulation?.away_win_probability ?? null,
-      home_win_probability: gameCard.simulation?.home_win_probability ?? null
+      home_win_probability: gameCard.simulation?.home_win_probability ?? null,
+      away_pitcher_baseline_source: readPitcherBaselineSource(awayStarter),
+      home_pitcher_baseline_source: readPitcherBaselineSource(homeStarter),
+      away_pitcher_identity_known: awayStarter?.pitcher_identity_known ?? null,
+      home_pitcher_identity_known: homeStarter?.pitcher_identity_known ?? null,
+      away_pitcher_fallback_reason: readPitcherFallbackReason(awayStarter),
+      home_pitcher_fallback_reason: readPitcherFallbackReason(homeStarter),
+      away_pitcher_fallback_used: awayStarter?.fallback_used ?? null,
+      home_pitcher_fallback_used: homeStarter?.fallback_used ?? null
     },
     draftkings_sportsbook_moneyline: {
       provider: "draftkings-sportsbook",
@@ -273,6 +303,15 @@ const createEmptySummary = () => ({
   top_edge_side: null
 });
 
+const collectFallbackGameIds = (rows: readonly BettingEdgeBoardRow[]): readonly GameId[] =>
+  rows
+    .filter(
+      (row) =>
+        row.projection.away_pitcher_fallback_used === true ||
+        row.projection.home_pitcher_fallback_used === true
+    )
+    .map((row) => row.game_id);
+
 export const createEmptyBettingEdgeBoard = ({
   source,
   date,
@@ -297,7 +336,9 @@ export const createEmptyBettingEdgeBoard = ({
   counts,
   ready_games: [],
   held_games: [],
-  note
+  note,
+  pitcher_fallback_count: 0,
+  pitcher_fallback_game_ids: []
 });
 
 export const buildBettingEdgeBoard = (
@@ -311,6 +352,7 @@ export const buildBettingEdgeBoard = (
       buildDegradedBettingRow(sourceGame, options.simulation)
     );
     const heldGames = [...rows].sort(sortHeldGames);
+    const fallbackGameIds = collectFallbackGameIds(heldGames);
 
     return {
       source: options.source,
@@ -332,7 +374,9 @@ export const buildBettingEdgeBoard = (
       },
       ready_games: [],
       held_games: heldGames,
-      note: options.note ?? null
+      note: options.note ?? null,
+      pitcher_fallback_count: fallbackGameIds.length,
+      pitcher_fallback_game_ids: fallbackGameIds
     };
   }
 
@@ -363,6 +407,9 @@ export const buildBettingEdgeBoard = (
     return sum + (edge ?? 0);
   }, 0);
 
+  const allRows = [...readyGames, ...heldGames];
+  const fallbackGameIds = collectFallbackGameIds(allRows);
+
   return {
     source: options.source,
     mode: "betting-edge-board-v1",
@@ -389,6 +436,8 @@ export const buildBettingEdgeBoard = (
     },
     ready_games: readyGames,
     held_games: heldGames,
-    note: options.note ?? null
+    note: options.note ?? null,
+    pitcher_fallback_count: fallbackGameIds.length,
+    pitcher_fallback_game_ids: fallbackGameIds
   };
 };

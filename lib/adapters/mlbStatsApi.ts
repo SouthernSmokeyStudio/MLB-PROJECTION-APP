@@ -631,7 +631,11 @@ const buildPreparedStarter = (
       vs_lhb_era: null,
       vs_rhb_era: null,
       days_rest: null,
-      last_start_pitches: null
+      last_start_pitches: null,
+      baseline_source: "season_stats",
+      pitcher_identity_known: true,
+      fallback_reason: null,
+      fallback_used: false
     });
   }
 
@@ -762,7 +766,11 @@ export const buildPreparedStarterFromPeopleStats = (
     vs_lhb_era: null,
     vs_rhb_era: null,
     days_rest: null,
-    last_start_pitches: null
+    last_start_pitches: null,
+    baseline_source: "season_stats",
+    pitcher_identity_known: true,
+    fallback_reason: null,
+    fallback_used: false
   };
 };
 

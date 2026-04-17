@@ -56,7 +56,11 @@
     "vs_lhb_era": 2.94,
     "vs_rhb_era": 2.67,
     "days_rest": 5,
-    "last_start_pitches": 97
+    "last_start_pitches": 97,
+    "baseline_source": "season_stats",
+    "pitcher_identity_known": true,
+    "fallback_reason": null,
+    "fallback_used": false
   },
   "home_starter": {
     "player_id": "chris-sale",
@@ -76,7 +80,11 @@
     "vs_lhb_era": 2.88,
     "vs_rhb_era": 3.52,
     "days_rest": 5,
-    "last_start_pitches": 94
+    "last_start_pitches": 94,
+    "baseline_source": "season_stats",
+    "pitcher_identity_known": true,
+    "fallback_reason": null,
+    "fallback_used": false
   },
   "away_batters": [
     { "player_id": "nyy-1", "mlb_stats_api_id": null, "team_id": "nyy", "batting_order": 1, "lineup_status": "confirmed_order", "handedness": "R", "season_pa": 610, "season_avg": 0.281, "season_obp": 0.364, "season_slg": 0.512, "season_woba": 0.371, "season_iso": 0.231, "season_k_rate": 0.221, "season_bb_rate": 0.107, "season_hr_rate": 0.062, "season_sb": 12, "recent_games_n": 10, "recent_woba": 0.352, "recent_avg": 0.273, "vs_lhp_woba": 0.381, "vs_rhp_woba": 0.366 },

@@ -463,7 +463,7 @@ describe("loadLiveSlate - projected starter flow into preparation", () => {
     expect(fetchMlbStatsApiPitcherSeasonStats).toHaveBeenCalledWith(519242, "2026");
   });
 
-  it("remains fail-closed when no official, projected, or inferred starter source exists", async () => {
+  it("applies TBD fallback starters when no official, projected, or inferred starter source exists", async () => {
     mockOneGameScheduleAndBoxscore();
 
     const result = await loadLiveSlate("2026-03-27");
@@ -473,18 +473,27 @@ describe("loadLiveSlate - projected starter flow into preparation", () => {
 
     const prepared = result.data.games[0]?.preparedGame;
     expect(prepared).toBeDefined();
-    expect(prepared?.away_starter).toBeNull();
-    expect(prepared?.home_starter).toBeNull();
-    expect(prepared?.has_both_starters).toBe(false);
-    expect(prepared?.blocked.blocked_reason).toContain(
-      "Missing away_starter preparation data"
-    );
-    expect(prepared?.blocked.blocked_reason).toContain(
-      "Missing home_starter preparation data"
-    );
 
-    const cards = buildPlayerCards(prepared!);
-    expect(cards.players).toHaveLength(0);
+    // Class 2 TBD fallback starters are produced — non-null, explicitly marked with provenance.
+    // The lane pitcher_league_average_fallback_15_of_15 guarantees that a game with
+    // probablePitcher = null on both sides gets TBD placeholder starters with
+    // season_era = BASE_LEAGUE_ERA so projectTeamRuns can run.
+    expect(prepared?.away_starter).not.toBeNull();
+    expect(prepared?.home_starter).not.toBeNull();
+    expect(prepared?.away_starter?.fallback_used).toBe(true);
+    expect(prepared?.home_starter?.fallback_used).toBe(true);
+    expect(prepared?.away_starter?.fallback_reason).toBe("probable_pitcher_tbd");
+    expect(prepared?.home_starter?.fallback_reason).toBe("probable_pitcher_tbd");
+    expect(prepared?.away_starter?.pitcher_identity_known).toBe(false);
+    expect(prepared?.home_starter?.pitcher_identity_known).toBe(false);
+    expect(prepared?.away_starter?.baseline_source).toBe("league_average_fallback");
+    expect(prepared?.home_starter?.baseline_source).toBe("league_average_fallback");
+    expect(prepared?.has_both_starters).toBe(true);
+
+    // Pitcher absence does NOT produce a blocked_reason — fail-closed is now batter-driven only.
+    const blockedReason = prepared?.blocked.blocked_reason ?? "";
+    expect(blockedReason).not.toContain("Missing away_starter preparation data");
+    expect(blockedReason).not.toContain("Missing home_starter preparation data");
   });
 
   it("does not invent projected pitcher full names from slug-only identity", async () => {

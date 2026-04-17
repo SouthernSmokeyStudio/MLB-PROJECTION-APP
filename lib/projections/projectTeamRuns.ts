@@ -10,7 +10,7 @@ export interface TeamRunsProjectionResult {
 
 const BASE_LEAGUE_RUNS_PER_GAME = 4.6;
 const BASE_LEAGUE_WOBA = 0.32;
-const BASE_LEAGUE_ERA = 4.2;
+export const BASE_LEAGUE_ERA = 4.2;
 const BASE_LEAGUE_BULLPEN_ERA = 4.1;
 
 const clamp = (value: number, min: number, max: number): number => Math.min(Math.max(value, min), max);

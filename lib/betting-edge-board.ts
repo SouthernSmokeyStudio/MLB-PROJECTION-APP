@@ -77,6 +77,23 @@ const readBoolean = (record: Record<string, unknown>, fieldName: string): boolea
   return value;
 };
 
+const readNullableBoolean = (
+  record: Record<string, unknown>,
+  fieldName: string
+): boolean | null => {
+  const value = record[fieldName];
+
+  if (value === null || value === undefined) {
+    return null;
+  }
+
+  if (typeof value !== "boolean") {
+    throw new Error(`Betting edge payload has invalid ${fieldName}.`);
+  }
+
+  return value;
+};
+
 const readBlockedState = (value: unknown): BlockedState => {
   if (!isRecord(value)) {
     throw new Error("Betting edge payload has invalid blocked state.");
@@ -136,6 +153,40 @@ const parseMoneylineSide = (
   };
 };
 
+const readNullablePitcherBaselineSource = (
+  record: Record<string, unknown>,
+  fieldName: string
+): "season_stats" | "league_average_fallback" | null => {
+  const value = record[fieldName];
+
+  if (value === null || value === undefined) {
+    return null;
+  }
+
+  if (value === "season_stats" || value === "league_average_fallback") {
+    return value;
+  }
+
+  throw new Error(`Betting edge payload has invalid ${fieldName}.`);
+};
+
+const readNullableFallbackReason = (
+  record: Record<string, unknown>,
+  fieldName: string
+): "pitcher_no_2026_stats" | "probable_pitcher_tbd" | null => {
+  const value = record[fieldName];
+
+  if (value === null || value === undefined) {
+    return null;
+  }
+
+  if (value === "pitcher_no_2026_stats" || value === "probable_pitcher_tbd") {
+    return value;
+  }
+
+  throw new Error(`Betting edge payload has invalid ${fieldName}.`);
+};
+
 const parseProjection = (value: unknown): BettingEdgeBoardRow["projection"] => {
   if (!isRecord(value)) {
     throw new Error("Betting edge payload has invalid projection block.");
@@ -147,7 +198,15 @@ const parseProjection = (value: unknown): BettingEdgeBoardRow["projection"] => {
     projected_home_runs: readNullableNumber(value, "projected_home_runs"),
     projected_total: readNullableNumber(value, "projected_total"),
     away_win_probability: readNullableNumber(value, "away_win_probability"),
-    home_win_probability: readNullableNumber(value, "home_win_probability")
+    home_win_probability: readNullableNumber(value, "home_win_probability"),
+    away_pitcher_baseline_source: readNullablePitcherBaselineSource(value, "away_pitcher_baseline_source"),
+    home_pitcher_baseline_source: readNullablePitcherBaselineSource(value, "home_pitcher_baseline_source"),
+    away_pitcher_identity_known: readNullableBoolean(value, "away_pitcher_identity_known"),
+    home_pitcher_identity_known: readNullableBoolean(value, "home_pitcher_identity_known"),
+    away_pitcher_fallback_reason: readNullableFallbackReason(value, "away_pitcher_fallback_reason"),
+    home_pitcher_fallback_reason: readNullableFallbackReason(value, "home_pitcher_fallback_reason"),
+    away_pitcher_fallback_used: readNullableBoolean(value, "away_pitcher_fallback_used"),
+    home_pitcher_fallback_used: readNullableBoolean(value, "home_pitcher_fallback_used")
   };
 };
 
@@ -304,7 +363,19 @@ export const parseBettingEdgeBoardPayload = (value: unknown): BettingEdgeBoardPa
     counts: parseCounts(value.counts),
     ready_games: value.ready_games.map(parseRow),
     held_games: value.held_games.map(parseRow),
-    note: readNullableString(value, "note")
+    note: readNullableString(value, "note"),
+    pitcher_fallback_count:
+      typeof value.pitcher_fallback_count === "number" && Number.isFinite(value.pitcher_fallback_count)
+        ? value.pitcher_fallback_count
+        : 0,
+    pitcher_fallback_game_ids: Array.isArray(value.pitcher_fallback_game_ids)
+      ? (value.pitcher_fallback_game_ids as unknown[]).map((id) => {
+          if (typeof id !== "string" || id.trim() === "") {
+            throw new Error("Betting edge payload has invalid pitcher_fallback_game_ids entry.");
+          }
+          return asGameId(id);
+        })
+      : []
   };
 };
 

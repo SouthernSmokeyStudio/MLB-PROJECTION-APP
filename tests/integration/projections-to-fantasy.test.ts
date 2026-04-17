@@ -54,7 +54,11 @@ const makePitcher = (id: string, teamId: string): PreparedPitcherInputs => ({
   vs_lhb_era: null,
   vs_rhb_era: null,
   days_rest: 5,
-  last_start_pitches: 95
+  last_start_pitches: 95,
+  baseline_source: "season_stats",
+  pitcher_identity_known: true,
+  fallback_reason: null,
+  fallback_used: false
 });
 
 const makeCompleteBatter = (

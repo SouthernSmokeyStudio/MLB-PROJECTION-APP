@@ -40,6 +40,14 @@ export interface PreparedPitcherInputs {
   readonly vs_rhb_era: number | null;
   readonly days_rest: number | null;
   readonly last_start_pitches: number | null;
+  /** Provenance: whether ERA came from live season stats or the league-average fallback. */
+  readonly baseline_source: "season_stats" | "league_average_fallback";
+  /** True when a specific pitcher identity is known; false for TBD / starter-not-announced. */
+  readonly pitcher_identity_known: boolean;
+  /** Non-null when fallback_used is true; describes which fallback class applies. */
+  readonly fallback_reason: "pitcher_no_2026_stats" | "probable_pitcher_tbd" | null;
+  /** True when BASE_LEAGUE_ERA is substituted for a missing or unavailable season_era. */
+  readonly fallback_used: boolean;
 }
 
 export interface PreparedBatterInputs {
