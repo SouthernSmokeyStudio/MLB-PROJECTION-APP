@@ -688,4 +688,79 @@ describe("/api/slate-snapshot route", () => {
     expect(vi.mocked(loadDraftKingsClassicSlate)).toHaveBeenCalledWith({ date: "2026-04-12" });
     expect(vi.mocked(loadDraftKingsSportsbookMlbMoneylineSlate)).toHaveBeenCalledWith({ date: "2026-04-12" });
   });
+
+  it("projected adapter fetch failure surfaces through player_projections payload note and status reason", async () => {
+    const fetchProjectedData = vi.fn().mockResolvedValue({
+      success: false,
+      error: "rotowire CDN challenge page — no lineup structure markers"
+    });
+
+    vi.mocked(buildMaterializerConfig).mockReturnValue({
+      success: true,
+      data: {
+        projectedAdapter: {
+          source: "rotowire",
+          fetchProjectedData
+        },
+        inferenceEngine: null,
+        officialOnly: false
+      }
+    });
+
+    vi.mocked(loadLiveSlate).mockResolvedValue({
+      success: true,
+      data: {
+        source: "mlb-statsapi-live",
+        date: "2026-04-17",
+        generated_at: asISOTimestamp("2026-04-17T15:30:00Z"),
+        counts: { fetched_raw: 0, parsed: 0, normalized: 0, prepared: 0, boxscore_enriched: 0 },
+        note: null,
+        games: []
+      }
+    });
+    vi.mocked(loadDraftKingsClassicSlate).mockResolvedValue({
+      success: true,
+      data: {
+        source: "draftkings-classic-live",
+        date: "2026-04-17",
+        generated_at: asISOTimestamp("2026-04-17T15:30:00Z"),
+        slates: [],
+        note: null
+      }
+    });
+    vi.mocked(loadDraftKingsSportsbookMlbMoneylineSlate).mockResolvedValue({
+      success: true,
+      data: {
+        source: "draftkings-sportsbook-mlb-moneyline-live",
+        date: "2026-04-17",
+        generated_at: asISOTimestamp("2026-04-17T15:30:00Z"),
+        moneyline_slate: null,
+        note: null
+      }
+    });
+
+    const response = await GET(
+      new NextRequest("http://localhost/api/slate-snapshot?date=2026-04-17")
+    );
+    const payload = (await response.json()) as Record<string, unknown>;
+
+    // Route degrades gracefully — adapter failure is not a 500
+    expect(response.status).toBe(200);
+    expect(fetchProjectedData).toHaveBeenCalledWith("2026-04-17");
+
+    const playerProjections = payload.player_projections as Record<string, unknown>;
+    const ppStatus = playerProjections.status as Record<string, unknown>;
+    const ppPayload = playerProjections.payload as Record<string, unknown>;
+
+    // Failure note reaches the player board payload note
+    expect(ppPayload.note).toContain("Projected source fetch failed:");
+    expect(ppPayload.note).toContain("rotowire CDN challenge page");
+
+    // With zero players the status reason also carries the note (via buildPlayerProjectionsStatus)
+    expect(ppStatus.reason).toContain("Projected source fetch failed:");
+    expect(ppStatus.reason).toContain("rotowire CDN challenge page");
+
+    // Adapter failure degrades to "empty", not "blocked" — "blocked" is reserved for mlbError
+    expect(ppStatus.state).toBe("empty");
+  });
 });

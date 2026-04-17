@@ -162,30 +162,33 @@ const slugifyPlayerName = (name: string): string =>
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "");
 
-const normalizeHandedness = (hand: string): Handedness => {
+const normalizeHandedness = (hand: string): Result<Handedness, string> => {
   const h = hand.trim().toUpperCase();
-  if (h === "L" || h === "LEFT") return "L";
-  if (h === "R" || h === "RIGHT") return "R";
-  if (h === "S" || h === "SWITCH") return "S";
-  return "unknown";
+  if (h === "" || h === "UNKNOWN") return ok("unknown");
+  if (h === "L" || h === "LEFT") return ok("L");
+  if (h === "R" || h === "RIGHT") return ok("R");
+  if (h === "S" || h === "SWITCH") return ok("S");
+  return err(`unrecognized handedness value: "${h}"`);
 };
 
-const normalizeStartingStatus = (status: string): StartingStatus => {
+const normalizeStartingStatus = (status: string): Result<StartingStatus, string> => {
   const s = status.trim().toLowerCase();
-  if (s === "confirmed" || s === "official") return "confirmed";
-  if (s === "expected" || s === "likely") return "expected";
-  if (s === "probable") return "probable";
-  return "unknown";
+  if (s === "" || s === "unknown") return ok("unknown");
+  if (s === "confirmed" || s === "official") return ok("confirmed");
+  if (s === "expected" || s === "likely") return ok("expected");
+  if (s === "probable") return ok("probable");
+  return err(`unrecognized starting status value: "${s}"`);
 };
 
 const VALID_POSITIONS: ReadonlySet<string> = new Set([
   "P", "C", "1B", "2B", "3B", "SS", "LF", "CF", "RF", "DH", "UTIL"
 ]);
 
-const normalizePosition = (pos: string): PlayerPosition => {
+const normalizePosition = (pos: string): Result<PlayerPosition, string> => {
   const p = pos.trim().toUpperCase();
-  if (VALID_POSITIONS.has(p)) return p as PlayerPosition;
-  return "unknown";
+  if (p === "" || p === "UNKNOWN") return ok("unknown");
+  if (VALID_POSITIONS.has(p)) return ok(p as PlayerPosition);
+  return err(`unrecognized position value: "${p}"`);
 };
 
 const buildGameId = (date: string, awayAbbr: string, homeAbbr: string): GameId =>
@@ -223,6 +226,8 @@ const extractListSection = (cardHtml: string, sideClass: string): string | null 
 interface ParsedSide {
   readonly starter: RwStarter | null;
   readonly lineup: readonly RwLineupPlayer[] | null;
+  /** Non-null when a pitcher highlight block exists but could not be fully parsed. */
+  readonly starterParseError: string | null;
 }
 
 /**
@@ -245,6 +250,8 @@ const parseSideFromList = (listHtml: string): ParsedSide => {
   const statusStr = statusMatch?.[1] ?? "unknown";
 
   let starter: RwStarter | null = null;
+  let starterParseError: string | null = null;
+  const hasPitcherBlock = listHtml.includes("player-highlight-name");
   if (pitcherMatch) {
     const hrefSlug = pitcherMatch[1]!;
     const hand = pitcherMatch[2]!.trim();
@@ -255,6 +262,10 @@ const parseSideFromList = (listHtml: string): ParsedSide => {
       hand,
       status: statusStr
     };
+  } else if (hasPitcherBlock) {
+    starterParseError =
+      "pitcher highlight block present but could not extract name or handedness" +
+      " — possible Rotowire HTML structure change";
   }
 
   // --- Lineup players ---
@@ -288,7 +299,8 @@ const parseSideFromList = (listHtml: string): ParsedSide => {
 
   return {
     starter,
-    lineup: players.length > 0 ? players : null
+    lineup: players.length > 0 ? players : null,
+    starterParseError
   };
 };
 
@@ -328,8 +340,23 @@ export const parseRotowireHtml = (
 
   // First element is preamble (everything before first card) — skip it.
   if (cardParts.length <= 1) {
-    // No lineup cards found. Could be off-season, no games today, or
-    // page structure changed. Return empty games (valid scenario).
+    // No is-mlb lineup cards found. Distinguish a legitimate off-day/off-season
+    // Rotowire page (which still carries Rotowire structural class markers like
+    // "lineup__list", "lineup__abbr", etc.) from a non-Rotowire response body
+    // (CDN challenge page, WAF block, maintenance page) that returned HTTP 200
+    // with text/html but contains none of the expected page structure.
+    //
+    // Inferred: a real Rotowire lineups page always contains "lineup__" class
+    // references in its template even when no games are scheduled. A CDN
+    // challenge or maintenance page will not.
+    if (!html.includes("lineup__")) {
+      return err(
+        "Rotowire response contains no lineup structure markers — " +
+        "possible CDN challenge page, maintenance page, or unexpected response body"
+      );
+    }
+    // Page has Rotowire structure but zero is-mlb cards: legitimate off-day
+    // or no games scheduled.
     return ok([]);
   }
 
@@ -361,8 +388,19 @@ export const parseRotowireHtml = (
     const visitList = extractListSection(section, "is-visit");
     const homeList = extractListSection(section, "is-home");
 
-    const awaySide = visitList ? parseSideFromList(visitList) : { starter: null, lineup: null };
-    const homeSide = homeList ? parseSideFromList(homeList) : { starter: null, lineup: null };
+    const awaySide = visitList
+      ? parseSideFromList(visitList)
+      : { starter: null, lineup: null, starterParseError: null };
+    const homeSide = homeList
+      ? parseSideFromList(homeList)
+      : { starter: null, lineup: null, starterParseError: null };
+
+    if (awaySide.starterParseError !== null) {
+      return err(`Game at index ${games.length} (away side): ${awaySide.starterParseError}`);
+    }
+    if (homeSide.starterParseError !== null) {
+      return err(`Game at index ${games.length} (home side): ${homeSide.starterParseError}`);
+    }
 
     games.push({
       away_team: awayTeam,
@@ -398,26 +436,45 @@ export const parseRotowireHtml = (
 const normalizeRwStarter = (
   rwStarter: RwStarter,
   teamId: TeamId
-): ProjectedStarter => ({
-  player_id: asPlayerId(slugifyPlayerName(rwStarter.name)),
-  full_name: rwStarter.name,
-  team_id: teamId,
-  handedness: normalizeHandedness(rwStarter.hand),
-  starting_status: normalizeStartingStatus(rwStarter.status),
-  confidence: rwStarter.status.toLowerCase() === "confirmed" ? "high" : "medium"
-});
+): Result<ProjectedStarter, string> => {
+  const handednessResult = normalizeHandedness(rwStarter.hand);
+  if (!handednessResult.success) {
+    return err(`starter "${rwStarter.name}": ${handednessResult.error}`);
+  }
+  const statusResult = normalizeStartingStatus(rwStarter.status);
+  if (!statusResult.success) {
+    return err(`starter "${rwStarter.name}": ${statusResult.error}`);
+  }
+  return ok({
+    player_id: asPlayerId(slugifyPlayerName(rwStarter.name)),
+    full_name: rwStarter.name,
+    team_id: teamId,
+    handedness: handednessResult.data,
+    starting_status: statusResult.data,
+    confidence: statusResult.data === "confirmed" ? "high" : "medium"
+  });
+};
 
 const normalizeRwLineup = (
   rwLineup: readonly RwLineupPlayer[],
   teamId: TeamId
-): readonly ProjectedLineupEntry[] =>
-  rwLineup.map((player) => ({
-    player_id: asPlayerId(slugifyPlayerName(player.name)),
-    team_id: teamId,
-    batting_order: player.batting_order,
-    position: normalizePosition(player.position),
-    starting_status: "expected" as StartingStatus
-  }));
+): Result<readonly ProjectedLineupEntry[], string> => {
+  const entries: ProjectedLineupEntry[] = [];
+  for (const player of rwLineup) {
+    const positionResult = normalizePosition(player.position);
+    if (!positionResult.success) {
+      return err(`lineup player "${player.name}": ${positionResult.error}`);
+    }
+    entries.push({
+      player_id: asPlayerId(slugifyPlayerName(player.name)),
+      team_id: teamId,
+      batting_order: player.batting_order,
+      position: positionResult.data,
+      starting_status: "expected"
+    });
+  }
+  return ok(entries);
+};
 
 const normalizeRwGame = (
   rwGame: RwGame,
@@ -431,20 +488,40 @@ const normalizeRwGame = (
   if (!homeNorm)
     return err(`Game at index ${index}: unrecognized home team abbreviation "${rwGame.home_team}"`);
 
+  let awayStarter: ProjectedStarter | null = null;
+  if (rwGame.away_starter !== null) {
+    const r = normalizeRwStarter(rwGame.away_starter, awayNorm.teamId);
+    if (!r.success) return err(`Game at index ${index} (away): ${r.error}`);
+    awayStarter = r.data;
+  }
+
+  let homeStarter: ProjectedStarter | null = null;
+  if (rwGame.home_starter !== null) {
+    const r = normalizeRwStarter(rwGame.home_starter, homeNorm.teamId);
+    if (!r.success) return err(`Game at index ${index} (home): ${r.error}`);
+    homeStarter = r.data;
+  }
+
+  let awayLineup: readonly ProjectedLineupEntry[] | null = null;
+  if (rwGame.away_lineup !== null) {
+    const r = normalizeRwLineup(rwGame.away_lineup, awayNorm.teamId);
+    if (!r.success) return err(`Game at index ${index} (away lineup): ${r.error}`);
+    awayLineup = r.data;
+  }
+
+  let homeLineup: readonly ProjectedLineupEntry[] | null = null;
+  if (rwGame.home_lineup !== null) {
+    const r = normalizeRwLineup(rwGame.home_lineup, homeNorm.teamId);
+    if (!r.success) return err(`Game at index ${index} (home lineup): ${r.error}`);
+    homeLineup = r.data;
+  }
+
   return ok({
     game_id: buildGameId(rwGame.game_date, awayNorm.canonical, homeNorm.canonical),
-    away_starter: rwGame.away_starter
-      ? normalizeRwStarter(rwGame.away_starter, awayNorm.teamId)
-      : null,
-    home_starter: rwGame.home_starter
-      ? normalizeRwStarter(rwGame.home_starter, homeNorm.teamId)
-      : null,
-    away_lineup: rwGame.away_lineup
-      ? normalizeRwLineup(rwGame.away_lineup, awayNorm.teamId)
-      : null,
-    home_lineup: rwGame.home_lineup
-      ? normalizeRwLineup(rwGame.home_lineup, homeNorm.teamId)
-      : null
+    away_starter: awayStarter,
+    home_starter: homeStarter,
+    away_lineup: awayLineup,
+    home_lineup: homeLineup
   });
 };
 
@@ -479,6 +556,13 @@ export const createRotowireProjectedSourceAdapter = (
     if (!response.ok) {
       return err(
         `Rotowire projected lineups returned HTTP ${response.status}`
+      );
+    }
+
+    const contentType = response.headers.get("content-type") ?? "";
+    if (!contentType.includes("text/html")) {
+      return err(
+        `Rotowire response has unexpected Content-Type: "${contentType}" — expected text/html`
       );
     }
 

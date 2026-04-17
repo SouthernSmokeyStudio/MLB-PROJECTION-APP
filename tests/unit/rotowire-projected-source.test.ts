@@ -34,10 +34,11 @@ const loadHtmlFixture = (name: string): string =>
 // Mock fetch globally for adapter-level tests
 // ---------------------------------------------------------------------------
 
-const mockFetchHtml = (html: string, status = 200) => {
+const mockFetchHtml = (html: string, status = 200, contentType = "text/html; charset=utf-8") => {
   global.fetch = vi.fn().mockResolvedValue({
     ok: status >= 200 && status < 300,
     status,
+    headers: { get: (name: string) => name.toLowerCase() === "content-type" ? contentType : null },
     text: () => Promise.resolve(html)
   });
 };
@@ -140,9 +141,11 @@ describe("parseRotowireHtml — valid response", () => {
     expect(result.error).toContain("empty");
   });
 
-  it("HTML with no lineup cards → ok with 0 games", () => {
+  it("Rotowire page with lineup__ structure but no is-mlb cards → ok with 0 games (off-day)", () => {
+    // A real Rotowire off-day page still carries the lineup__ class structure
+    // in its template even when no games are scheduled.
     const result = parseRotowireHtml(
-      "<html><body><p>No games today</p></body></html>",
+      "<html><body><div class=\"lineup__container\"><p>No games scheduled today.</p></div></body></html>",
       "2026-04-10"
     );
     expect(result.success).toBe(true);
@@ -489,6 +492,7 @@ describe("rotowire adapter — fail-closed", () => {
     global.fetch = vi.fn().mockResolvedValue({
       ok: true,
       status: 200,
+      headers: { get: (name: string) => name.toLowerCase() === "content-type" ? "text/html" : null },
       text: () => Promise.reject(new Error("stream error"))
     });
 
@@ -503,8 +507,8 @@ describe("rotowire adapter — fail-closed", () => {
     expect(result.error).toContain("could not be read");
   });
 
-  it("HTML with no lineup cards is valid (0 games)", async () => {
-    mockFetchHtml("<html><body>No games</body></html>");
+  it("Rotowire page with lineup__ structure but no is-mlb cards is valid (0 games, off-day)", async () => {
+    mockFetchHtml("<html><body><div class=\"lineup__container\">No games today.</div></body></html>");
 
     const adapter = createRotowireProjectedSourceAdapter({
       endpointUrl: "https://example.com/rotowire"
@@ -913,5 +917,410 @@ describe("rotowire adapter — real-world HTML shape", () => {
     expect(game.home_lineup).toHaveLength(1);
     expect(game.home_lineup![0]!.name).toBe("vladimir guerrero");
     expect(game.home_lineup![0]!.position).toBe("1B");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 9. Content-Type discrimination
+// ---------------------------------------------------------------------------
+
+describe("rotowire adapter — Content-Type discrimination", () => {
+  it("200 OK with application/json Content-Type → err", async () => {
+    const jsonBody = JSON.stringify({ error: "Unauthorized" });
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      headers: { get: (name: string) => name.toLowerCase() === "content-type" ? "application/json" : null },
+      text: () => Promise.resolve(jsonBody)
+    });
+
+    const adapter = createRotowireProjectedSourceAdapter({
+      endpointUrl: "https://example.com/rotowire"
+    });
+
+    const result = await adapter.fetchProjectedData("2026-04-10");
+
+    expect(result.success).toBe(false);
+    if (result.success) throw new Error("Should fail");
+    expect(result.error).toContain("Content-Type");
+    expect(result.error).toContain("application/json");
+    expect(result.error).toContain("text/html");
+  });
+
+  it("200 OK with empty Content-Type → err", async () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      headers: { get: () => "" },
+      text: () => Promise.resolve("<html>some page</html>")
+    });
+
+    const adapter = createRotowireProjectedSourceAdapter({
+      endpointUrl: "https://example.com/rotowire"
+    });
+
+    const result = await adapter.fetchProjectedData("2026-04-10");
+
+    expect(result.success).toBe(false);
+    if (result.success) throw new Error("Should fail");
+    expect(result.error).toContain("Content-Type");
+  });
+
+  it("200 OK with text/html Content-Type proceeds normally", async () => {
+    const html = loadHtmlFixture("valid-response.html");
+    mockFetchHtml(html);
+
+    const adapter = createRotowireProjectedSourceAdapter({
+      endpointUrl: "https://example.com/rotowire"
+    });
+
+    const result = await adapter.fetchProjectedData("2026-04-10");
+
+    expect(result.success).toBe(true);
+    if (!result.success) throw new Error(result.error);
+    expect(result.data.games).toHaveLength(2);
+  });
+
+  it("200 OK with json-error-body fixture and application/json → err naming Content-Type", async () => {
+    const body = JSON.stringify(
+      JSON.parse(require("fs").readFileSync(
+        require("path").join(__dirname, "../../data/fixtures/rotowire/json-error-body.json"),
+        "utf-8"
+      ))
+    );
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      headers: { get: (name: string) => name.toLowerCase() === "content-type" ? "application/json; charset=utf-8" : null },
+      text: () => Promise.resolve(body)
+    });
+
+    const adapter = createRotowireProjectedSourceAdapter({
+      endpointUrl: "https://example.com/rotowire"
+    });
+
+    const result = await adapter.fetchProjectedData("2026-04-10");
+
+    expect(result.success).toBe(false);
+    if (result.success) throw new Error("Should fail");
+    expect(result.error).toContain("Content-Type");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 10. Challenge page / maintenance page detection
+// ---------------------------------------------------------------------------
+
+describe("parseRotowireHtml — challenge page / maintenance page detection", () => {
+  it("CDN challenge page (no lineup__ structure) → err naming the failure", () => {
+    const html = loadHtmlFixture("cdn-challenge-page.html");
+    const result = parseRotowireHtml(html, "2026-04-10");
+
+    expect(result.success).toBe(false);
+    if (result.success) throw new Error("Should fail");
+    expect(result.error).toContain("no lineup structure markers");
+  });
+
+  it("maintenance page (no lineup__ structure) → err naming the failure", () => {
+    const html = loadHtmlFixture("maintenance-page.html");
+    const result = parseRotowireHtml(html, "2026-04-10");
+
+    expect(result.success).toBe(false);
+    if (result.success) throw new Error("Should fail");
+    expect(result.error).toContain("no lineup structure markers");
+  });
+
+  it("plain HTML with no lineup__ structure → err (not silent ok([]))", () => {
+    const result = parseRotowireHtml(
+      "<html><body><h1>Service Unavailable</h1></body></html>",
+      "2026-04-10"
+    );
+    expect(result.success).toBe(false);
+    if (result.success) throw new Error("Should fail — no lineup structure");
+    expect(result.error).toContain("no lineup structure markers");
+  });
+
+  it("page with lineup__ structure and zero is-mlb cards → ok([]) (legitimate off-day)", () => {
+    const result = parseRotowireHtml(
+      "<html><body><div class=\"lineup__container\">No games today.</div></body></html>",
+      "2026-04-10"
+    );
+    expect(result.success).toBe(true);
+    if (!result.success) throw new Error(result.error);
+    expect(result.data).toHaveLength(0);
+  });
+});
+
+describe("rotowire adapter — challenge page / maintenance page detection", () => {
+  it("CDN challenge page returns err at adapter level (not silent ok)", async () => {
+    const html = loadHtmlFixture("cdn-challenge-page.html");
+    mockFetchHtml(html);
+
+    const adapter = createRotowireProjectedSourceAdapter({
+      endpointUrl: "https://example.com/rotowire"
+    });
+
+    const result = await adapter.fetchProjectedData("2026-04-10");
+
+    expect(result.success).toBe(false);
+    if (result.success) throw new Error("Should fail — CDN challenge page");
+    expect(result.error).toContain("no lineup structure markers");
+  });
+
+  it("maintenance page returns err at adapter level (not silent ok)", async () => {
+    const html = loadHtmlFixture("maintenance-page.html");
+    mockFetchHtml(html);
+
+    const adapter = createRotowireProjectedSourceAdapter({
+      endpointUrl: "https://example.com/rotowire"
+    });
+
+    const result = await adapter.fetchProjectedData("2026-04-10");
+
+    expect(result.success).toBe(false);
+    if (result.success) throw new Error("Should fail — maintenance page");
+    expect(result.error).toContain("no lineup structure markers");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 11. Pitcher block present but missing throws span
+// ---------------------------------------------------------------------------
+
+describe("parseRotowireHtml — pitcher block parse failure", () => {
+  it("pitcher highlight block present but throws span absent → err (not silent null)", () => {
+    const html = loadHtmlFixture("pitcher-block-missing-throws.html");
+    const result = parseRotowireHtml(html, "2026-04-10");
+
+    expect(result.success).toBe(false);
+    if (result.success) throw new Error("Should fail — pitcher block without throws");
+    expect(result.error).toContain("pitcher highlight block present");
+    expect(result.error).toContain("could not extract name or handedness");
+  });
+
+  it("pitcher block parse error names the game index", () => {
+    const html = loadHtmlFixture("pitcher-block-missing-throws.html");
+    const result = parseRotowireHtml(html, "2026-04-10");
+
+    expect(result.success).toBe(false);
+    if (result.success) throw new Error("Should fail");
+    // First game = index 0
+    expect(result.error).toContain("Game at index 0");
+  });
+
+  it("pitcher block without player-highlight-name produces null starter (legitimate absent pitcher)", () => {
+    // No pitcher block at all — game just hasn't posted a starter yet.
+    // This should produce starter: null, NOT a parse error.
+    const html = `
+      <div class="lineup is-mlb">
+        <div class="lineup__teams">
+          <div class="lineup__team is-visit"><div class="lineup__abbr">NYY</div></div>
+          <div class="lineup__team is-home"><div class="lineup__abbr">BOS</div></div>
+        </div>
+        <div class="lineup__main">
+          <ul class="lineup__list is-visit">
+            <li class="lineup__status is-expected">Expected</li>
+          </ul>
+          <ul class="lineup__list is-home"></ul>
+        </div>
+      </div>`;
+
+    const result = parseRotowireHtml(html, "2026-04-10");
+
+    expect(result.success).toBe(true);
+    if (!result.success) throw new Error(result.error);
+    expect(result.data[0]!.away_starter).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 12. Unknown enum values — no silent coercion
+// ---------------------------------------------------------------------------
+
+describe("rotowire adapter — unknown enum values are not silently coerced", () => {
+  it("unrecognized pitcher handedness → err naming the value", async () => {
+    const html = loadHtmlFixture("unknown-enum-values.html");
+    mockFetchHtml(html);
+
+    const adapter = createRotowireProjectedSourceAdapter({
+      endpointUrl: "https://example.com/rotowire"
+    });
+
+    const result = await adapter.fetchProjectedData("2026-04-10");
+
+    expect(result.success).toBe(false);
+    if (result.success) throw new Error("Should fail — unrecognized handedness");
+    expect(result.error).toContain("unrecognized handedness value");
+    expect(result.error).toContain("\"A\"");
+  });
+
+  it("unrecognized lineup player position → err naming the value", async () => {
+    const html = `
+      <div class="lineup is-mlb">
+        <div class="lineup__teams">
+          <div class="lineup__team is-visit"><div class="lineup__abbr">NYY</div></div>
+          <div class="lineup__team is-home"><div class="lineup__abbr">BOS</div></div>
+        </div>
+        <div class="lineup__main">
+          <ul class="lineup__list is-visit"></ul>
+          <ul class="lineup__list is-home">
+            <li class="lineup__player">
+              <div class="lineup__pos">EH</div>
+              <a title="Some Player" href="/baseball/player/some-player-9999">Some Player</a>
+              <span class="lineup__bats">R</span>
+            </li>
+          </ul>
+        </div>
+      </div>`;
+    mockFetchHtml(html);
+
+    const adapter = createRotowireProjectedSourceAdapter({
+      endpointUrl: "https://example.com/rotowire"
+    });
+
+    const result = await adapter.fetchProjectedData("2026-04-10");
+
+    expect(result.success).toBe(false);
+    if (result.success) throw new Error("Should fail — unrecognized position");
+    expect(result.error).toContain("unrecognized position value");
+    expect(result.error).toContain("\"EH\"");
+  });
+
+  it("unrecognized starting status → err naming the value", async () => {
+    // Simulate Rotowire adding a new status class "is-uncertain"
+    const html = `
+      <div class="lineup is-mlb">
+        <div class="lineup__teams">
+          <div class="lineup__team is-visit"><div class="lineup__abbr">NYY</div></div>
+          <div class="lineup__team is-home"><div class="lineup__abbr">BOS</div></div>
+        </div>
+        <div class="lineup__main">
+          <ul class="lineup__list is-visit">
+            <li class="lineup__player-highlight mb-0">
+              <div class="lineup__player-highlight-name">
+                <a href="/baseball/player/gerrit-cole-1234">Gerrit Cole</a>
+                <span class="lineup__throws">R</span>
+              </div>
+            </li>
+            <li class="lineup__status is-uncertain">Uncertain</li>
+          </ul>
+          <ul class="lineup__list is-home"></ul>
+        </div>
+      </div>`;
+    mockFetchHtml(html);
+
+    const adapter = createRotowireProjectedSourceAdapter({
+      endpointUrl: "https://example.com/rotowire"
+    });
+
+    const result = await adapter.fetchProjectedData("2026-04-10");
+
+    expect(result.success).toBe(false);
+    if (result.success) throw new Error("Should fail — unrecognized status");
+    expect(result.error).toContain("unrecognized starting status value");
+    expect(result.error).toContain("\"uncertain\"");
+  });
+
+  it("empty/missing handedness → ok with 'unknown' (legitimate absent value)", async () => {
+    // A pitcher whose throws is blank — this is a genuinely absent value,
+    // not an unrecognized new value. Should normalize to "unknown", not error.
+    const html = `
+      <div class="lineup is-mlb">
+        <div class="lineup__teams">
+          <div class="lineup__team is-visit"><div class="lineup__abbr">NYY</div></div>
+          <div class="lineup__team is-home"><div class="lineup__abbr">BOS</div></div>
+        </div>
+        <div class="lineup__main">
+          <ul class="lineup__list is-visit">
+            <li class="lineup__player-highlight mb-0">
+              <div class="lineup__player-highlight-name">
+                <a href="/baseball/player/gerrit-cole-1234">Gerrit Cole</a>
+                <span class="lineup__throws"> </span>
+              </div>
+            </li>
+            <li class="lineup__status is-expected">Expected</li>
+          </ul>
+          <ul class="lineup__list is-home"></ul>
+        </div>
+      </div>`;
+    mockFetchHtml(html);
+
+    const adapter = createRotowireProjectedSourceAdapter({
+      endpointUrl: "https://example.com/rotowire"
+    });
+
+    const result = await adapter.fetchProjectedData("2026-04-10");
+
+    expect(result.success).toBe(true);
+    if (!result.success) throw new Error(result.error);
+    expect(result.data.games[0]!.away_starter!.handedness).toBe("unknown");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 13. Partial abbreviation failure — fail-all behavior is explicit
+// ---------------------------------------------------------------------------
+
+describe("rotowire adapter — partial abbreviation failure is explicit fail-all", () => {
+  it("one bad team abbreviation in a 3-game page → err, all 3 games unavailable", async () => {
+    const html = loadHtmlFixture("partial-abbreviation-failure.html");
+    mockFetchHtml(html);
+
+    const adapter = createRotowireProjectedSourceAdapter({
+      endpointUrl: "https://example.com/rotowire"
+    });
+
+    const result = await adapter.fetchProjectedData("2026-04-10");
+
+    // Fail-all: the bad game (index 1) kills the whole call.
+    // Games at index 0 (NYY/BOS) and index 2 (HOU/ATL) are also lost.
+    expect(result.success).toBe(false);
+    if (result.success) throw new Error("Should fail — ZZZZZ is not a recognized team");
+    expect(result.error).toContain("ZZZZZ");
+    expect(result.error).toContain("unrecognized");
+  });
+
+  it("partial abbreviation failure error names the game index", async () => {
+    const html = loadHtmlFixture("partial-abbreviation-failure.html");
+    mockFetchHtml(html);
+
+    const adapter = createRotowireProjectedSourceAdapter({
+      endpointUrl: "https://example.com/rotowire"
+    });
+
+    const result = await adapter.fetchProjectedData("2026-04-10");
+
+    expect(result.success).toBe(false);
+    if (result.success) throw new Error("Should fail");
+    // ZZZZZ is the away team in card at index 1 (0-based)
+    expect(result.error).toContain("index 1");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 14. All-null-sides — structurally valid but data-empty
+// ---------------------------------------------------------------------------
+
+describe("rotowire adapter — structurally valid page with all-null game data", () => {
+  it("all-null-sides fixture returns ok with 1 game, all sides null", async () => {
+    const html = loadHtmlFixture("all-null-sides.html");
+    mockFetchHtml(html);
+
+    const adapter = createRotowireProjectedSourceAdapter({
+      endpointUrl: "https://example.com/rotowire"
+    });
+
+    const result = await adapter.fetchProjectedData("2026-04-10");
+
+    expect(result.success).toBe(true);
+    if (!result.success) throw new Error(result.error);
+
+    expect(result.data.games).toHaveLength(1);
+    const game = result.data.games[0]!;
+    expect(game.game_id).toBe("mlb-2026-04-10-nyy-bos");
+    expect(game.away_starter).toBeNull();
+    expect(game.home_starter).toBeNull();
+    expect(game.away_lineup).toBeNull();
+    expect(game.home_lineup).toBeNull();
   });
 });
