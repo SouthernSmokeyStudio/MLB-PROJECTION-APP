@@ -1,0 +1,8 @@
+{
+  "crons": [
+    {
+      "path": "/api/cron/dk-moneyline-capture",
+      "schedule": "0 13 * * *"
+    }
+  ]
+}
