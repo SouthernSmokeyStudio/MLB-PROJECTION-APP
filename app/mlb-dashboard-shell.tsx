@@ -84,7 +84,7 @@ interface SmokeSignalState {
 }
 
 const SNAPSHOT_ROUTE = "/api/slate-snapshot";
-const LOGO_SRC = "/sss-smokey-studio-logo.jpeg";
+const LOGO_SRC = "/sss-baseball-logo.png";
 
 const INITIAL_SCHEDULE_STATE: ScheduleState = {
   status: "loading",
