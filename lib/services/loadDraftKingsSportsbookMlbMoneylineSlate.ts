@@ -220,18 +220,32 @@ export const loadDraftKingsSportsbookMlbMoneylineSlate = async ({
 
   const liveCount = filteredEntries.length;
 
-  // Always check Supabase: once games start they vanish from the NOT_STARTED feed.
-  // If Supabase has more entries it captured the full slate before first pitches.
+  // Build a lookup of live entries by game key so we can merge with the stored snapshot.
+  // Live entries have current odds; stored entries cover games that have since started.
+  const liveByKey = new Map(
+    filteredEntries.map((e) => [`${e.away_team_abbreviation}:${e.home_team_abbreviation}`, e])
+  );
+
   const snapshot = await loadSupabaseDkMoneylineSnapshot(date);
   const storedCount = snapshot?.entry_count ?? 0;
 
   if (storedCount > liveCount) {
+    // Merge: for each stored game, use the live entry (fresh odds) if still pregame,
+    // otherwise keep the stored entry (pre-game odds for games that have started).
+    const mergedEntries = snapshot!.payload.entries.map((stored) => {
+      const key = `${stored.away_team_abbreviation}:${stored.home_team_abbreviation}`;
+      return liveByKey.get(key) ?? stored;
+    });
+
+    const mergedSlate = { ...snapshot!.payload, entries: mergedEntries };
+    const startedCount = storedCount - liveCount;
+
     return ok({
       source: "draftkings-sportsbook-mlb-moneyline-supabase",
       date,
       generated_at: generatedAt,
-      moneyline_slate: snapshot!.payload,
-      note: `Supabase preferred: stored ${storedCount} entries vs live ${liveCount} (games may have started).`
+      moneyline_slate: mergedSlate,
+      note: `Merged: ${liveCount} live (current odds) + ${startedCount} stored (pre-game odds for started games).`
     });
   }
 
@@ -256,9 +270,8 @@ export const loadDraftKingsSportsbookMlbMoneylineSlate = async ({
     });
   }
 
-  // Live has at least as many entries as stored — await the store so it completes
-  // before the Lambda response is sent. Vercel exits the Lambda on response; void
-  // fire-and-forget never completes in practice.
+  // Live has more (or equal) entries — store to Supabase so future merges have
+  // the full slate. await ensures the write completes before the Lambda exits.
   if (liveCount > storedCount) {
     await storeSupabaseDkMoneylineSnapshot(date, { ...fetched.data, entries: filteredEntries });
   }
