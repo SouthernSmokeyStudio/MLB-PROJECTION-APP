@@ -256,9 +256,11 @@ export const loadDraftKingsSportsbookMlbMoneylineSlate = async ({
     });
   }
 
-  // Live has at least as many entries as stored — use live and update Supabase.
+  // Live has at least as many entries as stored — await the store so it completes
+  // before the Lambda response is sent. Vercel exits the Lambda on response; void
+  // fire-and-forget never completes in practice.
   if (liveCount > storedCount) {
-    void storeSupabaseDkMoneylineSnapshot(date, { ...fetched.data, entries: filteredEntries });
+    await storeSupabaseDkMoneylineSnapshot(date, { ...fetched.data, entries: filteredEntries });
   }
 
   return ok({
