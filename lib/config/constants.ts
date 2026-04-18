@@ -19,6 +19,8 @@ export const RANGE_BOUNDS = {
   k_per_9: { min: 0, max: 20 },
   bb_per_9: { min: 0, max: 15 },
   hr_per_9: { min: 0, max: 5 },
+  hr_rate: { min: 0, max: 0.15 },
+  iso: { min: 0, max: 0.40 },
   innings_pitched: { min: 0, max: 9 },
   park_factor: { min: 0.7, max: 1.4 },
   temperature_f: { min: 20, max: 120 },

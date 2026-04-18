@@ -6,7 +6,7 @@ import type {
   PreparedTeamInputs
 } from "@lib/contracts/prepared";
 import type { BlockedState, Handedness } from "@lib/contracts/types";
-import { projectTeamRuns } from "./projectTeamRuns";
+import { projectTeamRuns, type TeamRunsProjectionResult } from "./projectTeamRuns";
 
 export interface BatterProjectionResult {
   readonly blocked: BlockedState;
@@ -229,10 +229,22 @@ const buildTeamBatterProjection = (
     });
   }
 
-  return projections;
+  const rawRunSum = projections.reduce((s, p) => s + p.projected_runs, 0);
+  const rawRbiSum = projections.reduce((s, p) => s + p.projected_rbi, 0);
+  const runScale = rawRunSum > 0 ? teamProjectedRuns / rawRunSum : 1;
+  const rbiScale = rawRbiSum > 0 ? teamProjectedRuns / rawRbiSum : 1;
+
+  return projections.map((p) => ({
+    ...p,
+    projected_runs: round2(p.projected_runs * runScale),
+    projected_rbi: round2(p.projected_rbi * rbiScale)
+  }));
 };
 
-export const projectBatters = (inputs: PreparedGameInputs): BatterProjectionResult => {
+export const projectBatters = (
+  inputs: PreparedGameInputs,
+  precomputedTeamRuns?: TeamRunsProjectionResult
+): BatterProjectionResult => {
   if (inputs.blocked.is_blocked) {
     return buildBlocked(inputs.blocked.blocked_reason ?? "Prepared inputs are blocked");
   }
@@ -241,7 +253,7 @@ export const projectBatters = (inputs: PreparedGameInputs): BatterProjectionResu
     return buildBlocked("Both starting pitchers are required for baseline batter projections");
   }
 
-  const teamRuns = projectTeamRuns(inputs);
+  const teamRuns = precomputedTeamRuns ?? projectTeamRuns(inputs);
   if (
     teamRuns.blocked.is_blocked ||
     teamRuns.projected_away_runs === null ||

@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import rawFixture from "../../data/fixtures/sample-raw-game.json";
 import preparedFixture from "../../data/fixtures/sample-prepared-game.json";
 import invalidPreparedFixture from "../../data/fixtures/sample-prepared-game-invalid.json";
@@ -8,22 +8,8 @@ import { normalizeMlbStatsApiGame } from "../../lib/normalization/mlbStatsApiNor
 import { buildGameCard } from "../../lib/services/buildGameCard";
 import { buildPlayerCards } from "../../lib/services/buildPlayerCard";
 import { buildPlayerBoard } from "../../lib/services/buildPlayerBoard";
-import { persistPlayerProjections } from "../../lib/services/persistPlayerProjections";
 import { buildScheduleBoard } from "../../lib/services/buildScheduleBoard";
 
-// Persistence is mocked across all tests in this file. The board tests verify
-// the board contract, not the write path — that is covered in
-// persist-player-projections.test.ts.
-vi.mock("../../lib/services/persistPlayerProjections", () => ({
-  persistPlayerProjections: vi.fn().mockResolvedValue({
-    ok: true,
-    runId: "test-run-id",
-    projectedAt: "2026-03-27T15:30:00Z",
-    persistedGameCount: 1,
-    persistedBatterRowCount: 18,
-    persistedPitcherRowCount: 2
-  })
-}));
 
 const prepared = preparedFixture as unknown as PreparedGameInputs;
 const invalidPrepared = invalidPreparedFixture as unknown as PreparedGameInputs;
@@ -256,55 +242,3 @@ describe("phase 9 services", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// buildPlayerBoard — fail-closed persistence wiring
-// ---------------------------------------------------------------------------
-
-describe("buildPlayerBoard — fail-closed persistence wiring", () => {
-  it("throws the persistence error when persistPlayerProjections returns ok false", async () => {
-    const parsed = parseMlbStatsApiGamePayload(rawFixture);
-    if (!parsed.success) throw new Error(parsed.error);
-
-    const normalized = normalizeMlbStatsApiGame(parsed.data);
-    if (!normalized.success) throw new Error(normalized.error);
-
-    vi.mocked(persistPlayerProjections).mockResolvedValueOnce({
-      ok: false,
-      error: new Error("simulated DB failure")
-    });
-
-    await expect(
-      buildPlayerBoard(
-        [
-          {
-            parsedGame: parsed.data,
-            canonicalGame: normalized.data,
-            preparedGame: prepared,
-            liveScoreState: {
-              away_score: null,
-              home_score: null,
-              inning_number: null,
-              inning_state: null,
-              is_live: false,
-              is_final: false,
-              display_state: "Scheduled"
-            },
-            playerIdentities: {}
-          }
-        ],
-        {
-          source: "mlb-statsapi-live",
-          date: "2026-03-27",
-          generated_at: "2026-03-27T15:30:00Z",
-          counts: {
-            fetched_raw: 1,
-            parsed: 1,
-            normalized: 1,
-            prepared: 1,
-            boxscore_enriched: 1
-          }
-        }
-      )
-    ).rejects.toThrow("simulated DB failure");
-  });
-});

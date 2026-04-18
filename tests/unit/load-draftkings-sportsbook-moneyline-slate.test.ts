@@ -10,7 +10,8 @@ vi.mock("@lib/adapters/draftKingsSportsbook", () => ({
 }));
 
 vi.mock("@lib/materializer/schedule", () => ({
-  getDateInScheduleTimezone: vi.fn(() => "2026-04-12")
+  getDateInScheduleTimezone: vi.fn(() => "2026-04-12"),
+  MATERIALIZATION_TIMEZONE: "America/Chicago"
 }));
 
 import { fetchDraftKingsSportsbookMlbMoneylineSlate } from "@lib/adapters/draftKingsSportsbook";

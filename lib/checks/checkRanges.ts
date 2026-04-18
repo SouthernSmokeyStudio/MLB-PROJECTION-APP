@@ -26,7 +26,12 @@ export const checkBatterRanges = (batter: PreparedBatterInputs): readonly CheckR
   const checks = [
     outOfRange(batter.season_avg, RANGE_BOUNDS.batting_avg.min, RANGE_BOUNDS.batting_avg.max, "season_avg", "batter", batter.player_id),
     outOfRange(batter.season_obp, RANGE_BOUNDS.on_base_pct.min, RANGE_BOUNDS.on_base_pct.max, "season_obp", "batter", batter.player_id),
-    outOfRange(batter.season_slg, RANGE_BOUNDS.slugging_pct.min, RANGE_BOUNDS.slugging_pct.max, "season_slg", "batter", batter.player_id)
+    outOfRange(batter.season_slg, RANGE_BOUNDS.slugging_pct.min, RANGE_BOUNDS.slugging_pct.max, "season_slg", "batter", batter.player_id),
+    outOfRange(batter.season_woba, RANGE_BOUNDS.woba.min, RANGE_BOUNDS.woba.max, "season_woba", "batter", batter.player_id),
+    outOfRange(batter.season_k_rate, RANGE_BOUNDS.k_rate.min, RANGE_BOUNDS.k_rate.max, "season_k_rate", "batter", batter.player_id),
+    outOfRange(batter.season_bb_rate, RANGE_BOUNDS.bb_rate.min, RANGE_BOUNDS.bb_rate.max, "season_bb_rate", "batter", batter.player_id),
+    outOfRange(batter.season_hr_rate, RANGE_BOUNDS.hr_rate.min, RANGE_BOUNDS.hr_rate.max, "season_hr_rate", "batter", batter.player_id),
+    outOfRange(batter.season_iso, RANGE_BOUNDS.iso.min, RANGE_BOUNDS.iso.max, "season_iso", "batter", batter.player_id)
   ].filter(Boolean) as CheckResult[];
 
   results.push(...checks);
@@ -41,7 +46,10 @@ export const checkPitcherRanges = (pitcher: PreparedPitcherInputs): readonly Che
   const checks = [
     outOfRange(pitcher.season_era, RANGE_BOUNDS.era.min, RANGE_BOUNDS.era.max, "season_era", "pitcher", pitcher.player_id),
     outOfRange(pitcher.season_whip, RANGE_BOUNDS.whip.min, RANGE_BOUNDS.whip.max, "season_whip", "pitcher", pitcher.player_id),
-    outOfRange(pitcher.recent_ip_per_start, RANGE_BOUNDS.innings_pitched.min, RANGE_BOUNDS.innings_pitched.max, "recent_ip_per_start", "pitcher", pitcher.player_id)
+    outOfRange(pitcher.recent_ip_per_start, RANGE_BOUNDS.innings_pitched.min, RANGE_BOUNDS.innings_pitched.max, "recent_ip_per_start", "pitcher", pitcher.player_id),
+    outOfRange(pitcher.season_k_per_9, RANGE_BOUNDS.k_per_9.min, RANGE_BOUNDS.k_per_9.max, "season_k_per_9", "pitcher", pitcher.player_id),
+    outOfRange(pitcher.season_bb_per_9, RANGE_BOUNDS.bb_per_9.min, RANGE_BOUNDS.bb_per_9.max, "season_bb_per_9", "pitcher", pitcher.player_id),
+    outOfRange(pitcher.season_hr_per_9, RANGE_BOUNDS.hr_per_9.min, RANGE_BOUNDS.hr_per_9.max, "season_hr_per_9", "pitcher", pitcher.player_id)
   ].filter(Boolean) as CheckResult[];
 
   results.push(...checks);

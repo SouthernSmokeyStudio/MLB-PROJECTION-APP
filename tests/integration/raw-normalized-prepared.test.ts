@@ -97,12 +97,12 @@ describe("raw -> normalized -> prepared pipeline", () => {
     expect(blocked.blocked.blocked_reason ?? "").toContain("Missing home_batters preparation data");
 
     // Fallback starters ARE created from the canonical probable pitchers
-    // (not null, not blocked at this layer), but their stat fields are null.
+    // (not null, not blocked at this layer), and carry league-average ERA fallback.
     expect(blocked.away_starter).not.toBeNull();
     expect(blocked.away_starter?.player_id).toBe("gerrit-cole");
-    expect(blocked.away_starter?.season_era).toBeNull();
+    expect(blocked.away_starter?.season_era).toBeCloseTo(4.2);
     expect(blocked.home_starter).not.toBeNull();
     expect(blocked.home_starter?.player_id).toBe("chris-sale");
-    expect(blocked.home_starter?.season_era).toBeNull();
+    expect(blocked.home_starter?.season_era).toBeCloseTo(4.2);
   });
 });

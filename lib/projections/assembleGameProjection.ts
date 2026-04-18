@@ -39,13 +39,13 @@ const buildMetadata = (inputs: PreparedGameInputs, blockedReason: string | null)
 
 export const assembleGameProjection = (inputs: PreparedGameInputs): AssembledGameProjection => {
   const teamRuns = projectTeamRuns(inputs);
-  const pitcherProjection = projectPitchers(inputs);
-  const batterProjection = projectBatters(inputs);
+  const pitcherProjection = projectPitchers(inputs, teamRuns);
+  const batterProjection = projectBatters(inputs, teamRuns);
 
   const blockedReason =
-    teamRuns.blocked.blocked_reason ??
-    pitcherProjection.blocked.blocked_reason ??
-    batterProjection.blocked.blocked_reason ??
+    (teamRuns.blocked.is_blocked ? teamRuns.blocked.blocked_reason : null) ??
+    (pitcherProjection.blocked.is_blocked ? pitcherProjection.blocked.blocked_reason : null) ??
+    (batterProjection.blocked.is_blocked ? batterProjection.blocked.blocked_reason : null) ??
     null;
 
   const awayRuns = teamRuns.projected_away_runs ?? 0;

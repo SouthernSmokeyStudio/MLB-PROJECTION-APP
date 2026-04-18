@@ -52,8 +52,8 @@ const buildPlayerBoardRowsForGame = (
   options: Pick<BuildPlayerBoardOptions, "simulation">
 ): readonly PlayerBoardRow[] => {
   const { players } = buildPlayerCards(sourceGame.preparedGame, {
-    ...options,
-    assembled: assembledProjection
+    assembled: assembledProjection,
+    ...(options.simulation !== undefined ? { simulation: options.simulation } : {})
   });
   const matchup = buildMatchupLabel(sourceGame);
 

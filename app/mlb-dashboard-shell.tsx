@@ -949,7 +949,7 @@ const GameProjectionsWorkspace = ({
 const PlayerCardGrid = ({ players }: { players: PlayerBoardPayload["players"] }) => (
   <div className="player-card-grid">
     {players.map((player) => (
-      <article className={`player-card ${player.projection.blocked.is_blocked ? "held" : "ready"}`} key={player.player_id}>
+      <article className={`player-card ${player.projection.blocked.is_blocked ? "held" : "ready"}`} key={`${player.player_id}::${player.game_id}`}>
         <div className="player-card-topline">
           <span className={`player-card-badge ${player.projection.blocked.is_blocked ? "held" : "ready"}`}>{formatPlayerProjectionStatus(player)}</span>
           <span className="player-card-timing">{formatScheduledStart(player.scheduled_start)}</span>

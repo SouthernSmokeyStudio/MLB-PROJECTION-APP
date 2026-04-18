@@ -5,7 +5,7 @@ import type {
   PreparedTeamInputs
 } from "@lib/contracts/prepared";
 import type { BlockedState } from "@lib/contracts/types";
-import { projectTeamRuns } from "./projectTeamRuns";
+import { projectTeamRuns, type TeamRunsProjectionResult } from "./projectTeamRuns";
 
 export interface PitcherProjectionResult {
   readonly blocked: BlockedState;
@@ -108,12 +108,15 @@ const buildPitcherProjection = (
   };
 };
 
-export const projectPitchers = (inputs: PreparedGameInputs): PitcherProjectionResult => {
+export const projectPitchers = (
+  inputs: PreparedGameInputs,
+  precomputedTeamRuns?: TeamRunsProjectionResult
+): PitcherProjectionResult => {
   if (!inputs.away_starter || !inputs.home_starter) {
     return buildBlocked("Both starting pitchers are required for baseline pitcher projections");
   }
 
-  const teamRuns = projectTeamRuns(inputs);
+  const teamRuns = precomputedTeamRuns ?? projectTeamRuns(inputs);
   if (
     teamRuns.blocked.is_blocked ||
     teamRuns.projected_away_runs === null ||

@@ -72,24 +72,23 @@ const sharedPreGame = {
 
 describe("BF-001 canonical-path: projectTeamRuns unblocked by people-stats starters", () => {
 
-  it("Phase A — without people stats, fallback starters have null season_era, projectTeamRuns blocks", () => {
-    // This is the pre-BF-001 state: boxscore extraction returned null starters,
-    // prepareGameInputs fell back to buildFallbackPitcherInputs.
+  it("Phase A — without people stats, fallback starters use league_average season_era, projectTeamRuns runs with defaults", () => {
+    // League-average fallback: prepareGameInputs now supplies BASE_LEAGUE_ERA (4.2)
+    // for fallback starters so projectTeamRuns can produce a default projection.
     const phase_a = prepareGameInputs(canonicalGame, sharedPreGame);
 
-    // Starters exist (fallback), but all stat fields are null
+    // Starters exist (fallback) with league-average ERA populated
     expect(phase_a.away_starter).not.toBeNull();
-    expect(phase_a.away_starter?.season_era).toBeNull();
+    expect(phase_a.away_starter?.season_era).toBeCloseTo(4.2);
     expect(phase_a.home_starter).not.toBeNull();
-    expect(phase_a.home_starter?.season_era).toBeNull();
+    expect(phase_a.home_starter?.season_era).toBeCloseTo(4.2);
 
-    // preparedGame may or may not be blocked (batters are supplied), but
-    // the projection gate is inside projectTeamRuns, not prepareGameInputs.
+    // projectTeamRuns now runs (not blocked) using league-average defaults
     const teamRuns_a = projectTeamRuns(phase_a);
-    expect(teamRuns_a.blocked.is_blocked).toBe(true);
-    expect(teamRuns_a.projected_away_runs).toBeNull();
-    expect(teamRuns_a.projected_home_runs).toBeNull();
-    expect(teamRuns_a.projected_total_runs).toBeNull();
+    expect(teamRuns_a.blocked.is_blocked).toBe(false);
+    expect(teamRuns_a.projected_away_runs).not.toBeNull();
+    expect(teamRuns_a.projected_home_runs).not.toBeNull();
+    expect(teamRuns_a.projected_total_runs).not.toBeNull();
   });
 
   it("Phase B — after BF-001 fallback, real season_era populates starters, projectTeamRuns unblocks", () => {
@@ -161,9 +160,9 @@ describe("BF-001 canonical-path: projectTeamRuns unblocked by people-stats start
       home_starter: homeStarter
     });
 
-    // Phase A → blocked at projectTeamRuns because season_era is null
-    expect(phase_a.away_starter?.season_era).toBeNull();
-    expect(projectTeamRuns(phase_a).blocked.is_blocked).toBe(true);
+    // Phase A → runs with league-average fallback ERA, not blocked
+    expect(phase_a.away_starter?.season_era).toBeCloseTo(4.2);
+    expect(projectTeamRuns(phase_a).blocked.is_blocked).toBe(false);
 
     // Phase B → unblocked at projectTeamRuns because season_era is populated
     expect(phase_b.away_starter?.season_era).toBeCloseTo(3.20);
