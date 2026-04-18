@@ -4,6 +4,10 @@ import { fetchDraftKingsSportsbookMlbMoneylineSlate } from "@lib/adapters/draftK
 import type { DraftKingsSportsbookMlbMoneylineSlate } from "@lib/contracts/draftkings-sportsbook-mlb-moneyline";
 import { asISOTimestamp, err, ok, type Result } from "@lib/contracts/types";
 import { getDateInScheduleTimezone, MATERIALIZATION_TIMEZONE } from "@lib/materializer/schedule";
+import {
+  loadSupabaseDkMoneylineSnapshot,
+  storeSupabaseDkMoneylineSnapshot
+} from "@lib/supabase/dkMoneylineSnapshots";
 
 const PERSISTED_VERSION = 1 as const;
 const DEFAULT_ARTIFACT_DIR = join(process.cwd(), "data", "draftkings-sportsbook-moneyline");
@@ -11,6 +15,7 @@ const DEFAULT_ARTIFACT_DIR = join(process.cwd(), "data", "draftkings-sportsbook-
 export interface LoadedDraftKingsSportsbookMlbMoneylineSlate {
   readonly source:
     | "draftkings-sportsbook-mlb-moneyline-live"
+    | "draftkings-sportsbook-mlb-moneyline-supabase"
     | "draftkings-sportsbook-mlb-moneyline-persisted";
   readonly date: string;
   readonly generated_at: string;
@@ -165,6 +170,8 @@ export const captureSportsbookMlbMoneylineSlate = async ({
     entries: filteredEntries
   };
 
+  // Write to Supabase (survives Lambda restarts) and filesystem (local dev convenience).
+  await storeSupabaseDkMoneylineSnapshot(date, slate);
   const persistResult = await persistArtifact({ date, artifactDir, moneyline_slate: slate });
   if (!persistResult.success) {
     return err(persistResult.error);
@@ -183,6 +190,17 @@ export const loadDraftKingsSportsbookMlbMoneylineSlate = async ({
   const fetched = await fetchDraftKingsSportsbookMlbMoneylineSlate();
 
   if (!fetched.success) {
+    // Live feed unavailable — try Supabase first (survives Lambda restarts), then filesystem.
+    const snapshot = await loadSupabaseDkMoneylineSnapshot(date);
+    if (snapshot) {
+      return ok({
+        source: "draftkings-sportsbook-mlb-moneyline-supabase",
+        date,
+        generated_at: generatedAt,
+        moneyline_slate: snapshot.payload,
+        note: "Supabase fallback: live DraftKings Sportsbook feed unavailable."
+      });
+    }
     const persisted = await loadPersistedArtifact({ date, artifactDir });
     if (persisted.success && persisted.data) {
       return ok({
@@ -200,7 +218,25 @@ export const loadDraftKingsSportsbookMlbMoneylineSlate = async ({
     (entry) => toScheduleTimezoneDate(entry.start_time) === date
   );
 
-  if (filteredEntries.length === 0) {
+  const liveCount = filteredEntries.length;
+
+  // Always check Supabase: once games start they vanish from the NOT_STARTED feed.
+  // If Supabase has more entries it captured the full slate before first pitches.
+  const snapshot = await loadSupabaseDkMoneylineSnapshot(date);
+  const storedCount = snapshot?.entry_count ?? 0;
+
+  if (storedCount > liveCount) {
+    return ok({
+      source: "draftkings-sportsbook-mlb-moneyline-supabase",
+      date,
+      generated_at: generatedAt,
+      moneyline_slate: snapshot!.payload,
+      note: `Supabase preferred: stored ${storedCount} entries vs live ${liveCount} (games may have started).`
+    });
+  }
+
+  if (liveCount === 0) {
+    // No live entries and Supabase is empty — try filesystem last.
     const persisted = await loadPersistedArtifact({ date, artifactDir });
     if (persisted.success && persisted.data) {
       return ok({
@@ -218,6 +254,11 @@ export const loadDraftKingsSportsbookMlbMoneylineSlate = async ({
       moneyline_slate: null,
       note: "No DraftKings Sportsbook MLB pregame moneyline rows matched the requested date."
     });
+  }
+
+  // Live has at least as many entries as stored — use live and update Supabase.
+  if (liveCount > storedCount) {
+    void storeSupabaseDkMoneylineSnapshot(date, { ...fetched.data, entries: filteredEntries });
   }
 
   return ok({
