@@ -16,6 +16,7 @@ import {
   type Handedness,
   type StartingStatus
 } from "@lib/contracts/types";
+import { probabilityToFairAmericanOdds } from "@lib/market/fairPrice";
 
 const BOARD_TIME_ZONE = "America/Chicago";
 
@@ -435,6 +436,35 @@ export const buildAvailabilityLine = (game: ScheduleBoardGame): string => {
   }
 
   return `${lineupCoverage} | Projection ready from current inputs | ${playerProjectionStatus}`;
+};
+
+const formatAmericanOddsSign = (odds: number): string =>
+  odds > 0 ? `+${odds}` : String(odds);
+
+const isValidProbability = (value: number | null): value is number =>
+  value !== null && Number.isFinite(value) && value > 0 && value < 1;
+
+export const formatFairOddsLabel = (game: ScheduleBoardGame): string | null => {
+  const away = game.projection.away_win_probability;
+  const home = game.projection.home_win_probability;
+  if (!isValidProbability(away) || !isValidProbability(home)) return null;
+  const awayOdds = probabilityToFairAmericanOdds(away);
+  const homeOdds = probabilityToFairAmericanOdds(home);
+  return `${game.away_team.abbreviation} ${formatAmericanOddsSign(awayOdds)} / ${game.home_team.abbreviation} ${formatAmericanOddsSign(homeOdds)}`;
+};
+
+export const formatGameTypeLabel = (game: ScheduleBoardGame): string => {
+  if (game.projection.blocked.is_blocked) return "Incomplete";
+  const total = game.projection.projected_total;
+  const away = game.projection.projected_away_runs;
+  const home = game.projection.projected_home_runs;
+  if (total === null || away === null || home === null) return "Pending";
+  const spread = Math.abs(away - home);
+  if (total < 7.0) return "Pitcher's Duel";
+  if (total >= 10.0) return "Slugfest";
+  if (spread <= 0.5) return "Balanced";
+  if (spread > 1.5) return away > home ? "Away Edge" : "Home Edge";
+  return "Balanced";
 };
 
 export const getErrorMessage = (value: unknown): string =>

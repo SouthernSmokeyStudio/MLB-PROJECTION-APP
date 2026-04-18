@@ -16,6 +16,8 @@ import {
   buildAvailabilityLine,
   buildStarterLine,
   formatBoardDate,
+  formatFairOddsLabel,
+  formatGameTypeLabel,
   formatGeneratedStamp,
   formatProjectionEdgeLabel,
   formatProjectedTotalLabel,
@@ -231,9 +233,6 @@ const SmokeSignalCard = ({
   </article>
 );
 
-const buildPlayerCarryLine = (game: ScheduleBoardPayload["games"][number]): string =>
-  game.player_projection_status === "ready" ? "Player board is live for this matchup." : "Player board is still building for this matchup.";
-
 const buildPlayerBoardPopulationCopy = (board: PlayerBoardPayload | null): BoardPopulationCopy | null => {
   if (!board) {
     return null;
@@ -438,6 +437,15 @@ const GameDetailDrawer = ({ game, onClose }: { game: ScheduleBoardPayload["games
   const edgeLabel = formatProjectionEdgeLabel(game);
   const totalLabel = formatProjectedTotalLabel(game);
   const favoriteSummary = edgeLabel ?? "Projected matchup view is still waiting on full starter and lineup carry.";
+  const runSpreadLabel = (() => {
+    const away = game.projection.projected_away_runs;
+    const home = game.projection.projected_home_runs;
+    if (away === null || home === null) return "Pending";
+    const diff = away - home;
+    if (diff === 0) return "Pick";
+    const leader = diff > 0 ? game.away_team.abbreviation : game.home_team.abbreviation;
+    return `${leader} by ${Math.abs(diff).toFixed(1)}`;
+  })();
 
   return (
     <div className="game-detail-overlay" role="presentation" onClick={onClose}>
@@ -471,21 +479,37 @@ const GameDetailDrawer = ({ game, onClose }: { game: ScheduleBoardPayload["games
 
         <section className="game-detail-card">
           <div className="game-detail-card-header">
-            <strong>Matchup</strong>
+            <strong>Game Projection Summary</strong>
             <span>{game.venue_name ?? "Venue pending"}</span>
           </div>
           <div className="game-detail-facts">
             <div className="game-detail-fact">
-              <span className="game-detail-fact-label">Starters</span>
-              <p className="game-detail-fact-copy">{buildStarterLine(game)}</p>
+              <span className="game-detail-fact-label">Projected Final</span>
+              <p className="game-detail-fact-copy">
+                {game.projection.projected_away_runs !== null && game.projection.projected_home_runs !== null
+                  ? `${game.away_team.abbreviation} ${formatProjectedRuns(game.projection.projected_away_runs)} \u2013 ${game.home_team.abbreviation} ${formatProjectedRuns(game.projection.projected_home_runs)}`
+                  : "Pending"}
+              </p>
             </div>
             <div className="game-detail-fact">
-              <span className="game-detail-fact-label">Lineup status</span>
-              <p className="game-detail-fact-copy">{buildAvailabilityLine(game)}</p>
+              <span className="game-detail-fact-label">Win Probability</span>
+              <p className="game-detail-fact-copy">{formatProjectionEdgeLabel(game) ?? "Pending"}</p>
             </div>
             <div className="game-detail-fact">
-              <span className="game-detail-fact-label">Player board</span>
-              <p className="game-detail-fact-copy">{buildPlayerCarryLine(game)}</p>
+              <span className="game-detail-fact-label">Fair Odds</span>
+              <p className="game-detail-fact-copy">{formatFairOddsLabel(game) ?? "Pending"}</p>
+            </div>
+            <div className="game-detail-fact">
+              <span className="game-detail-fact-label">Game Type</span>
+              <p className="game-detail-fact-copy">{formatGameTypeLabel(game)}</p>
+            </div>
+            <div className="game-detail-fact">
+              <span className="game-detail-fact-label">Projected Total Runs</span>
+              <p className="game-detail-fact-copy">{formatProjectedTotalLabel(game) ?? "Pending"}</p>
+            </div>
+            <div className="game-detail-fact">
+              <span className="game-detail-fact-label">Run Spread</span>
+              <p className="game-detail-fact-copy">{runSpreadLabel}</p>
             </div>
           </div>
         </section>
@@ -515,7 +539,6 @@ const GameDetailDrawer = ({ game, onClose }: { game: ScheduleBoardPayload["games
                 {totalLabel ? <span className="signal-chip signal-chip-neutral">{totalLabel}</span> : null}
                 <span className="signal-chip signal-chip-neutral">{game.venue_name ?? "Venue pending"}</span>
               </div>
-              <p className="game-detail-copy">{buildPlayerCarryLine(game)}</p>
             </>
           )}
         </section>
