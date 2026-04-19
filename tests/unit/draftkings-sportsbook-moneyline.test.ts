@@ -776,6 +776,43 @@ describe("BF-004 — end-to-end join proof: raw DK shortName → parse → join 
     expect(joined.held_games).toBe(0);
     expect(joined.games[0]?.draftkings_sportsbook_moneyline.blocked.is_blocked).toBe(false);
   });
+
+  it("in-progress game (is_live: true) with stored pregame moneyline resolves as ready", () => {
+    // Regression: KC@NYY 2026-04-19 board path. After game start the DK live feed
+    // rotates the game out, but the Supabase snapshot preserves the pregame odds.
+    // The board must accept a stored moneyline for a game already underway —
+    // is_live=true in liveScoreState must not cause a held classification.
+    const liveSourceGame = {
+      ...buildSourceGameWithTeams("KC", "NYY", "2026-04-06T22:05:00Z"),
+      liveScoreState: {
+        away_score: 0,
+        home_score: 0,
+        inning_number: 1,
+        inning_state: "top" as const,
+        is_live: true,
+        is_final: false,
+        display_state: "Top 1st"
+      }
+    };
+
+    const storedSlate = makeMoneylineSlate([
+      {
+        away_team_abbreviation: "KC",
+        home_team_abbreviation: "NYY",
+        start_time: asISOTimestamp("2026-04-06T22:05:00Z")
+      }
+    ]);
+
+    const joined = joinDraftKingsSportsbookMoneylines({
+      sourceGames: [liveSourceGame],
+      moneylineSlate: storedSlate,
+      options: { simulation: { seed: 17, iterations: 250 } }
+    });
+
+    expect(joined.ready_games).toBe(1);
+    expect(joined.held_games).toBe(0);
+    expect(joined.games[0]?.draftkings_sportsbook_moneyline.blocked.is_blocked).toBe(false);
+  });
 });
 
 // ---------------------------------------------------------------------------

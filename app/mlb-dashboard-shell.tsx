@@ -285,14 +285,14 @@ const buildBettingBoardPopulationCopy = (board: BettingEdgeBoardPayload | null):
   if (board.summary.ready_games === 0) {
     return {
       title: "No moneyline-ready matchups yet.",
-      body: "Betting Edge only shows matchups that have a live DraftKings Sportsbook pregame moneyline.",
+      body: "Betting Edge only shows matchups that have a DraftKings Sportsbook pregame moneyline.",
     };
   }
 
   if (board.held_games.length > 0) {
     return {
       title: "Some matchups are still waiting on a moneyline.",
-      body: "Only matchups with a live DraftKings Sportsbook moneyline appear on the ready side.",
+      body: "Only matchups with a DraftKings Sportsbook pregame moneyline appear on the ready side.",
     };
   }
 
@@ -1457,7 +1457,7 @@ const BettingEdgeWorkspace = ({ bettingState, bettingBoard }: { bettingState: Be
           <p className="workspace-eyebrow">Betting Edge</p>
           <h2>DraftKings Sportsbook</h2>
           <p className="workspace-copy">
-            This board only uses projection-ready game rows plus live DraftKings Sportsbook MLB pregame moneyline truth. It surfaces one-book moneyline odds and derived edge without totals, props, or multi-book comparison.
+            This board only uses projection-ready game rows plus DraftKings Sportsbook MLB pregame moneyline truth (live feed or stored snapshot). It surfaces one-book moneyline odds and derived edge without totals, props, or multi-book comparison.
           </p>
         </div>
         <div className="workspace-pill-stack">
@@ -1495,7 +1495,7 @@ const BettingEdgeWorkspace = ({ bettingState, bettingBoard }: { bettingState: Be
         <div className="schedule-state">
           <p className="workspace-eyebrow">No Board</p>
           <h3>No moneyline-ready matchups yet.</h3>
-          <p>{bettingState.note ?? bettingBoard?.note ?? "This board fills once projected matchups have a live DraftKings Sportsbook pregame moneyline."}</p>
+          <p>{bettingState.note ?? bettingBoard?.note ?? "This board fills once projected matchups have a DraftKings Sportsbook pregame moneyline."}</p>
         </div>
       ) : null}
 
@@ -1533,7 +1533,7 @@ const BettingEdgeWorkspace = ({ bettingState, bettingBoard }: { bettingState: Be
                 {bettingBoard.ready_games.length > 0 ? (
                   <BettingEdgeMatchList games={sortBettingGames(bettingBoard.ready_games)} />
                 ) : (
-                  <p className="projection-roster-empty">No projected matchup has a live DraftKings Sportsbook pregame moneyline yet.</p>
+<p className="projection-roster-empty">No projected matchup has a DraftKings Sportsbook pregame moneyline yet.</p>
                 )}
               </div>
 
