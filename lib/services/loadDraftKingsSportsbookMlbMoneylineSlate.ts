@@ -1,7 +1,7 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import { fetchDraftKingsSportsbookMlbMoneylineSlate } from "@lib/adapters/draftKingsSportsbook";
-import type { DraftKingsSportsbookMlbMoneylineSlate } from "@lib/contracts/draftkings-sportsbook-mlb-moneyline";
+import { fetchDraftKingsSportsbookMlbMoneylineSlate, normalizeDkTeamAbbreviation } from "@lib/adapters/draftKingsSportsbook";
+import type { DraftKingsSportsbookMlbMoneylineEntry, DraftKingsSportsbookMlbMoneylineSlate } from "@lib/contracts/draftkings-sportsbook-mlb-moneyline";
 import { asISOTimestamp, err, ok, type Result } from "@lib/contracts/types";
 import { getDateInScheduleTimezone, MATERIALIZATION_TIMEZONE } from "@lib/materializer/schedule";
 import {
@@ -63,6 +63,57 @@ const buildMissedWindowMessage = ({
   readonly artifactDir: string;
 }): string =>
   `No DraftKings Sportsbook MLB pregame moneyline rows for ${date}; same-day capture may already be too late. Replay requires a previously captured artifact at ${getArtifactPath(date, artifactDir)}.`;
+
+// ---------------------------------------------------------------------------
+// Merge helpers — canonical-key based to prevent abbreviation-variant duplicates
+// ---------------------------------------------------------------------------
+
+// Normalize both sides before using as a merge/dedup key.
+// Prevents "KC:NY" (pre-fix stored) and "KC:NYY" (post-fix live) from being
+// treated as different games, which would create duplicate entries and an
+// ambiguous join that permanently holds the game on the board.
+const canonicalKey = (entry: DraftKingsSportsbookMlbMoneylineEntry): string => {
+  const away = normalizeDkTeamAbbreviation(entry.away_team_abbreviation).canonical;
+  const home = normalizeDkTeamAbbreviation(entry.home_team_abbreviation).canonical;
+  return `${away}:${home}`;
+};
+
+// Merge live entries into stored entries using canonical game keys.
+// Live entry wins when present (current odds). Stored entry is kept when the
+// game has started and DK has rotated it out of the pregame feed.
+// New live entries not yet in stored are appended (late-added games).
+const mergeMoneylineEntries = ({
+  stored,
+  live
+}: {
+  readonly stored: readonly DraftKingsSportsbookMlbMoneylineEntry[];
+  readonly live: readonly DraftKingsSportsbookMlbMoneylineEntry[];
+}): readonly DraftKingsSportsbookMlbMoneylineEntry[] => {
+  const liveByKey = new Map(live.map((e) => [canonicalKey(e), e]));
+  const storedCanonicalKeys = new Set(stored.map(canonicalKey));
+  const fromStored = stored.map((s) => liveByKey.get(canonicalKey(s)) ?? s);
+  const extraLive = live.filter((e) => !storedCanonicalKeys.has(canonicalKey(e)));
+  return [...fromStored, ...extraLive];
+};
+
+// Deduplicate entries on canonical key — first occurrence wins.
+// Guards against snapshots written before canonical-key merging was in place
+// (e.g., both "KC:NY" and "KC:NYY" stored side-by-side). After dedup, the
+// join sees exactly one entry per game, eliminating ambiguous-match holds.
+const deduplicateOnCanonicalKey = (
+  entries: readonly DraftKingsSportsbookMlbMoneylineEntry[]
+): readonly DraftKingsSportsbookMlbMoneylineEntry[] => {
+  const seen = new Set<string>();
+  const result: DraftKingsSportsbookMlbMoneylineEntry[] = [];
+  for (const entry of entries) {
+    const key = canonicalKey(entry);
+    if (!seen.has(key)) {
+      seen.add(key);
+      result.push(entry);
+    }
+  }
+  return result;
+};
 
 const loadPersistedArtifact = async ({
   date,
@@ -165,9 +216,16 @@ export const captureSportsbookMlbMoneylineSlate = async ({
     );
   }
 
+  // Merge with any existing snapshot so started games are never overwritten.
+  // Live entries provide current odds; stored entries preserve games that have
+  // already started and rotated out of the DK live feed.
+  const existing = await loadSupabaseDkMoneylineSnapshot(date);
+  const storedEntries = existing?.payload.entries ?? [];
+  const mergedEntries = mergeMoneylineEntries({ stored: storedEntries, live: filteredEntries });
+
   const slate: DraftKingsSportsbookMlbMoneylineSlate = {
     ...fetched.data,
-    entries: filteredEntries
+    entries: mergedEntries
   };
 
   // Write to Supabase (survives Lambda restarts) and filesystem (local dev convenience).
@@ -187,20 +245,30 @@ export const loadDraftKingsSportsbookMlbMoneylineSlate = async ({
   Result<LoadedDraftKingsSportsbookMlbMoneylineSlate, string>
 > => {
   const generatedAt = new Date().toISOString();
+
+  // 1. Read locked Supabase truth first. If a snapshot with entries exists,
+  //    return it immediately without touching the live DK API. The live feed
+  //    is an update source (capture path only), not a render source. This
+  //    guarantees started games never disappear when DK rotates them out of
+  //    the pregame feed. Deduplication on canonical key heals snapshots that
+  //    were written before the canonical-key merge was in place.
+  const snapshot = await loadSupabaseDkMoneylineSnapshot(date);
+  if (snapshot && snapshot.payload.entries.length > 0) {
+    const entries = deduplicateOnCanonicalKey(snapshot.payload.entries);
+    return ok({
+      source: "draftkings-sportsbook-mlb-moneyline-supabase",
+      date,
+      generated_at: generatedAt,
+      moneyline_slate: { ...snapshot.payload, entries },
+      note: null
+    });
+  }
+
+  // 2. No snapshot yet — attempt live feed to seed the initial capture.
   const fetched = await fetchDraftKingsSportsbookMlbMoneylineSlate();
 
   if (!fetched.success) {
-    // Live feed unavailable — try Supabase first (survives Lambda restarts), then filesystem.
-    const snapshot = await loadSupabaseDkMoneylineSnapshot(date);
-    if (snapshot) {
-      return ok({
-        source: "draftkings-sportsbook-mlb-moneyline-supabase",
-        date,
-        generated_at: generatedAt,
-        moneyline_slate: snapshot.payload,
-        note: "Supabase fallback: live DraftKings Sportsbook feed unavailable."
-      });
-    }
+    // Live also unavailable — try filesystem last.
     const persisted = await loadPersistedArtifact({ date, artifactDir });
     if (persisted.success && persisted.data) {
       return ok({
@@ -218,64 +286,8 @@ export const loadDraftKingsSportsbookMlbMoneylineSlate = async ({
     (entry) => toScheduleTimezoneDate(entry.start_time) === date
   );
 
-  const liveCount = filteredEntries.length;
-
-  // Build a lookup of live entries by game key so we can merge with the stored snapshot.
-  // Live entries have current odds; stored entries cover games that have since started.
-  const liveByKey = new Map(
-    filteredEntries.map((e) => [`${e.away_team_abbreviation}:${e.home_team_abbreviation}`, e])
-  );
-
-  const snapshot = await loadSupabaseDkMoneylineSnapshot(date);
-  const storedEntries = snapshot?.payload.entries ?? [];
-
-  if (snapshot && storedEntries.length > 0) {
-    // Always merge when a snapshot exists.  Live entries provide current odds for
-    // still-pregame games; stored entries fill in games that have already started
-    // (DK rotates those out of the live feed permanently at first pitch).
-    //
-    // This replaces the old `storedCount > liveCount` guard which was brittle:
-    // if the snapshot was written after some games started, storedCount could
-    // equal liveCount and the merge would silently skip started games.
-    const mergedFromStored = storedEntries.map((stored) => {
-      const key = `${stored.away_team_abbreviation}:${stored.home_team_abbreviation}`;
-      return liveByKey.get(key) ?? stored;
-    });
-
-    // Include any live entries that aren't in the stored snapshot yet (e.g.
-    // the snapshot predates a late-added game).
-    const storedKeys = new Set(
-      storedEntries.map((e) => `${e.away_team_abbreviation}:${e.home_team_abbreviation}`)
-    );
-    const extraLiveEntries = filteredEntries.filter(
-      (e) => !storedKeys.has(`${e.away_team_abbreviation}:${e.home_team_abbreviation}`)
-    );
-    const mergedEntries = [...mergedFromStored, ...extraLiveEntries];
-
-    // Persist the expanded list so the next request also sees the new games.
-    if (extraLiveEntries.length > 0) {
-      await storeSupabaseDkMoneylineSnapshot(date, {
-        ...snapshot.payload,
-        entries: mergedEntries
-      });
-    }
-
-    const startedCount = mergedEntries.length - liveCount;
-    return ok({
-      source: "draftkings-sportsbook-mlb-moneyline-supabase",
-      date,
-      generated_at: generatedAt,
-      moneyline_slate: { ...snapshot.payload, entries: mergedEntries },
-      note:
-        startedCount > 0
-          ? `Merged: ${liveCount} live (current odds) + ${startedCount} stored (pre-game odds for started games).`
-          : null
-    });
-  }
-
-  // No usable snapshot yet.
-  if (liveCount === 0) {
-    // No live entries either — try filesystem last.
+  if (filteredEntries.length === 0) {
+    // No live entries and no snapshot — try filesystem.
     const persisted = await loadPersistedArtifact({ date, artifactDir });
     if (persisted.success && persisted.data) {
       return ok({
@@ -295,8 +307,7 @@ export const loadDraftKingsSportsbookMlbMoneylineSlate = async ({
     });
   }
 
-  // First request of the day with live entries — seed the snapshot so future
-  // requests can merge started games against this full pregame baseline.
+  // Seed the snapshot so future requests read locked Supabase truth directly.
   await storeSupabaseDkMoneylineSnapshot(date, { ...fetched.data, entries: filteredEntries });
 
   return ok({
