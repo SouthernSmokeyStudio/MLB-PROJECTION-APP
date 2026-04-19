@@ -1,4 +1,4 @@
-﻿import type { BatterProjection } from "@lib/contracts/projections";
+import type { BatterProjection } from "@lib/contracts/projections";
 import type {
   PreparedBatterInputs,
   PreparedGameInputs,
@@ -209,7 +209,7 @@ const buildTeamBatterProjection = (
     );
 
     const projectedSb =
-      isFallbackBatter && seasonPa === 0 ? 0 : round2((resolvedSeasonSb / seasonPa) * projectedPa);
+      seasonPa === 0 ? 0 : round2((resolvedSeasonSb / seasonPa) * projectedPa);
 
     projections.push({
       player_id: batter.player_id,
