@@ -1,0 +1,87 @@
+name: Daily Evaluation
+
+on:
+  schedule:
+    # 11:00 UTC daily — morning games are final by then (ET close ~1:00 UTC, PT close ~4:00 UTC)
+    - cron: "0 11 * * *"
+  workflow_dispatch:
+    inputs:
+      date:
+        description: "Evaluation date (YYYY-MM-DD). Defaults to yesterday."
+        required: false
+
+jobs:
+  evaluate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install Node dependencies
+        run: npm ci
+
+      - name: Install Python dependencies
+        run: pip install -r python/requirements.txt
+
+      - name: Resolve evaluation date
+        id: date
+        run: |
+          if [ -n "${{ github.event.inputs.date }}" ]; then
+            echo "value=${{ github.event.inputs.date }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "value=$(date -u -d yesterday +%Y-%m-%d)" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Write harness.env
+        run: |
+          cat > python/harness.env <<EOF
+          POSTGRES_DSN=${{ secrets.POSTGRES_DSN }}
+          RUN_DATE=${{ steps.date.outputs.value }}
+          RUN_KIND=projection
+          RUN_STATE=lock
+          ENVIRONMENT=production
+          RAW_ROOT=./raw
+          ARTIFACT_ROOT=./artifacts
+          SCHEMA_VERSION=v10
+          PARSER_VERSION=v1
+          MODEL_VERSION=v1
+          HTTP_TIMEOUT_SECONDS=30
+          USER_AGENT=SSS-MLB-Pipeline/1.0
+          MAX_RETRIES=3
+          BACKOFF_SECONDS=0.5
+          LOG_LEVEL=INFO
+          EOF
+
+      - name: Write .env.local
+        run: |
+          cat > .env.local <<EOF
+          NEXT_PUBLIC_SUPABASE_URL=${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          NEXT_PUBLIC_SUPABASE_ANON_KEY=${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
+          SUPABASE_SERVICE_ROLE_KEY=${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          ROTOWIRE_ENDPOINT_URL=${{ secrets.ROTOWIRE_ENDPOINT_URL }}
+          EOF
+
+      - name: Run evaluation
+        run: python python/run_manual.py --date ${{ steps.date.outputs.value }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: evaluation-${{ steps.date.outputs.value }}
+          path: python/artifacts/${{ steps.date.outputs.value }}__*.json
+          retention-days: 90

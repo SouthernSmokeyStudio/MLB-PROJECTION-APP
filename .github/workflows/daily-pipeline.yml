@@ -1,26 +1,13 @@
 name: Daily Pipeline
 
+# Superseded by daily-evaluation.yml — kept for historical reference only.
+# All scheduled evaluation work now runs in daily-evaluation.yml.
 on:
   workflow_dispatch:
 
 jobs:
-  scaffold-check:
+  noop:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-          cache: pip
-
-      - name: Install Python dependencies
-        run: pip install -r python/requirements.txt
-
-      # Production scheduling remains blocked until Functions 1-15 exist
-      # beyond scaffold-only placeholders.
-      - name: Run scaffold check
-        run: python python/pipeline.py --mode scaffold-check
+      - name: Redirect notice
+        run: echo "This workflow is superseded by daily-evaluation.yml"
