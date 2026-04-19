@@ -8,6 +8,14 @@ import type {
 import { asISOTimestamp, asPlayerId, type ISOTimestamp } from "@lib/contracts/types";
 import { BASE_LEAGUE_ERA } from "@lib/projections/projectTeamRuns";
 
+// League-average fallback constants for pitchers with no 2026 stat split.
+// These fill the four fields required by buildPitcherProjection so the game
+// is never blocked solely because a known starter has no regular-season data yet.
+const FALLBACK_WHIP = 1.25;
+const FALLBACK_K_PER_9 = 8.5;
+const FALLBACK_BB_PER_9 = 3.3;
+const FALLBACK_IP_PER_START = 5.5;
+
 export interface GamePreparationData {
   readonly prepared_at: ISOTimestamp;
   readonly away_team: PreparedTeamInputs;
@@ -192,14 +200,14 @@ const buildFallbackPitcherInputs = (
       handedness: "unknown",
       season_ip: null,
       season_era: BASE_LEAGUE_ERA,
-      season_whip: null,
-      season_k_per_9: null,
-      season_bb_per_9: null,
+      season_whip: FALLBACK_WHIP,
+      season_k_per_9: FALLBACK_K_PER_9,
+      season_bb_per_9: FALLBACK_BB_PER_9,
       season_hr_per_9: null,
       recent_starts_n: null,
       recent_era: null,
       recent_k_per_9: null,
-      recent_ip_per_start: null,
+      recent_ip_per_start: FALLBACK_IP_PER_START,
       vs_lhb_era: null,
       vs_rhb_era: null,
       days_rest: null,
@@ -219,14 +227,14 @@ const buildFallbackPitcherInputs = (
     handedness: probablePitcher.handedness,
     season_ip: null,
     season_era: BASE_LEAGUE_ERA,
-    season_whip: null,
-    season_k_per_9: null,
-    season_bb_per_9: null,
+    season_whip: FALLBACK_WHIP,
+    season_k_per_9: FALLBACK_K_PER_9,
+    season_bb_per_9: FALLBACK_BB_PER_9,
     season_hr_per_9: null,
     recent_starts_n: null,
     recent_era: null,
     recent_k_per_9: null,
-    recent_ip_per_start: null,
+    recent_ip_per_start: FALLBACK_IP_PER_START,
     vs_lhb_era: null,
     vs_rhb_era: null,
     days_rest: null,
