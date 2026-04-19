@@ -3,6 +3,8 @@ import type { PreparedBatterInputs, PreparedGameInputs } from "@lib/contracts/pr
 import type { AssembledGameProjection } from "@lib/projections/assembleGameProjection";
 import type { BatterProjection, PitcherProjection } from "@lib/contracts/projections";
 import { getSupabaseWriteClient } from "@lib/supabase/writeClient";
+import { deriveBatterFantasyPoints, derivePitcherFantasyPoints } from "@lib/scoring/deriveFantasyPoints";
+import { DK_CLASSIC_RULES_V1 } from "@lib/contracts/scoring";
 
 export interface PersistPlayerProjectionsGameInput {
   readonly preparedGame: PreparedGameInputs;
@@ -73,6 +75,7 @@ interface BatterRow {
   used_fallback_season_hr_rate: boolean;
   used_fallback_season_sb: boolean;
   used_fallback_season_woba: boolean;
+  projected_dk_fpts: number;
 }
 
 interface PitcherRow {
@@ -85,6 +88,7 @@ interface PitcherRow {
   projected_er: number;
   projected_hits: number;
   projected_bb: number;
+  projected_dk_fpts: number;
 }
 
 export interface AtomicProjectionRunPayload {
@@ -126,6 +130,22 @@ const deriveBatterRow = (
     used_fallback_season_woba = isFallback && prepared.season_woba === null;
   }
 
+  const projected_dk_fpts = deriveBatterFantasyPoints(
+    {
+      projected_singles: batter.projected_singles,
+      projected_doubles: batter.projected_doubles,
+      projected_triples: batter.projected_triples,
+      projected_hr: batter.projected_hr,
+      projected_rbi: batter.projected_rbi,
+      projected_runs: batter.projected_runs,
+      projected_bb: batter.projected_bb,
+      projected_hbp: 0,
+      projected_sb: batter.projected_sb,
+      projected_cs: 0
+    },
+    DK_CLASSIC_RULES_V1
+  );
+
   return {
     run_id: runId,
     game_id: batter.game_id,
@@ -145,7 +165,8 @@ const deriveBatterRow = (
     used_fallback_season_bb_rate,
     used_fallback_season_hr_rate,
     used_fallback_season_sb,
-    used_fallback_season_woba
+    used_fallback_season_woba,
+    projected_dk_fpts
   };
 };
 
@@ -195,6 +216,22 @@ const buildPitcherRow = (
     );
   }
 
+  const projected_dk_fpts = derivePitcherFantasyPoints(
+    {
+      projected_ip: pitcher.projected_ip,
+      projected_k: pitcher.projected_k,
+      projected_er: pitcher.projected_er,
+      projected_hits: pitcher.projected_hits,
+      projected_bb: pitcher.projected_bb,
+      projected_win_probability: pitcher.win_probability,
+      projected_hbp_allowed: 0,
+      projected_complete_game: 0,
+      projected_shutout: 0,
+      projected_no_hitter: 0
+    },
+    DK_CLASSIC_RULES_V1
+  );
+
   return {
     run_id: runId,
     game_id: pitcher.game_id,
@@ -204,7 +241,8 @@ const buildPitcherRow = (
     projected_k: pitcher.projected_k,
     projected_er: pitcher.projected_er,
     projected_hits: pitcher.projected_hits,
-    projected_bb: pitcher.projected_bb
+    projected_bb: pitcher.projected_bb,
+    projected_dk_fpts
   };
 };
 
