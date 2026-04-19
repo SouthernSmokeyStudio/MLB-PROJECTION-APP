@@ -35,3 +35,6 @@ python/harness.env
 python/__pycache__/
 python/.pytest_cache/
 python/artifacts/*.json
+
+# Local DraftKings Classic capture artifacts
+data/draftkings-classic/*.json
