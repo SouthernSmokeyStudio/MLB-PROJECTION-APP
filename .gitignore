@@ -4,3 +4,24 @@ coverage
 dist
 .env
 .env.local
+
+# Local agent state
+.claude/
+
+# Supabase CLI temp
+supabase/.temp/
+
+# Local run artifacts
+tmp/
+
+# TypeScript incremental build cache
+tsconfig.tsbuildinfo
+
+# Generated export artifacts
+sss_mlb_*.zip
+
+# Expanded artifact directories
+sss_mlb_*/
+
+# Schema draft history at repo root
+sss_mlb_projection_schema_v*.sql
