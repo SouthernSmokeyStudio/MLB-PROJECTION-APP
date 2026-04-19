@@ -187,6 +187,19 @@ const enrichTeamInputs = (
  * in enrichedData when the live stats fetch returns no 2026 split or when no
  * probable pitcher is announced.  prepareGameInputs then calls this function.
  */
+// Fills null critical projection fields on any PreparedPitcherInputs (e.g. a
+// pitcher returned from the stats API with an incomplete 2026 split) so that
+// buildPitcherProjection and computeProjectedIp never receive null for a
+// required field even when real stats are partially available.
+const patchNullStarterFields = (starter: PreparedPitcherInputs): PreparedPitcherInputs => ({
+  ...starter,
+  season_era: starter.season_era ?? BASE_LEAGUE_ERA,
+  season_whip: starter.season_whip ?? FALLBACK_WHIP,
+  season_k_per_9: starter.season_k_per_9 ?? FALLBACK_K_PER_9,
+  season_bb_per_9: starter.season_bb_per_9 ?? FALLBACK_BB_PER_9,
+  recent_ip_per_start: starter.recent_ip_per_start ?? FALLBACK_IP_PER_START
+});
+
 const buildFallbackPitcherInputs = (
   probablePitcher: CanonicalGame["away"]["probable_pitcher"],
   teamId: PreparedTeamInputs["team_id"]
@@ -348,8 +361,8 @@ export const prepareGameInputs = (
     data?.home_team_season_hitting,
     data?.home_team_relief_pitching
   );
-  const awayStarter = data?.away_starter ?? buildFallbackPitcherInputs(game.away.probable_pitcher, awayTeam.team_id);
-  const homeStarter = data?.home_starter ?? buildFallbackPitcherInputs(game.home.probable_pitcher, homeTeam.team_id);
+  const awayStarter = patchNullStarterFields(data?.away_starter ?? buildFallbackPitcherInputs(game.away.probable_pitcher, awayTeam.team_id));
+  const homeStarter = patchNullStarterFields(data?.home_starter ?? buildFallbackPitcherInputs(game.home.probable_pitcher, homeTeam.team_id));
   const awayBatters = data?.away_batters ?? [];
   const homeBatters = data?.home_batters ?? [];
 
