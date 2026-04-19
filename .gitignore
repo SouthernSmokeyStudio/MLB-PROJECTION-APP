@@ -29,3 +29,9 @@ sss_mlb_projection_schema_v*.sql
 # Local operator-only files
 mlb_projection_app_operator_inventory.xlsx
 run-final-window-proof.ps1
+
+# Python local runtime + cache
+python/harness.env
+python/__pycache__/
+python/.pytest_cache/
+python/artifacts/*.json
