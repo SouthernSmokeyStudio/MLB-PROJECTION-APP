@@ -10,6 +10,10 @@ import type {
 } from "@lib/contracts/draftkings-classic";
 import { asISOTimestamp, ok, err, type Result } from "@lib/contracts/types";
 import { getDateInScheduleTimezone } from "@lib/materializer/schedule";
+import {
+  loadSupabaseDkClassicSnapshot,
+  storeSupabaseDkClassicSnapshot
+} from "@lib/supabase/dkClassicSnapshots";
 
 const MLB_SPORT_ID = 2;
 const DRAFTKINGS_CLASSIC_CONTEST_TYPE_ID = 28;
@@ -27,7 +31,7 @@ export interface LoadedDraftKingsClassicSlateItem {
 }
 
 export interface LoadedDraftKingsClassicSlate {
-  readonly source: "draftkings-classic-live" | "draftkings-classic-persisted";
+  readonly source: "draftkings-classic-live" | "draftkings-classic-supabase" | "draftkings-classic-persisted";
   readonly date: string;
   readonly generated_at: string;
   /** All same-date Classic slates discovered. Empty when none matched. */
@@ -403,6 +407,9 @@ export const backfillDraftKingsClassicSlate = async ({
     return err("All DraftKings Classic salary slate fetches failed");
   }
 
+  // Write to Supabase (survives Lambda restarts) alongside filesystem (local dev).
+  await storeSupabaseDkClassicSnapshot(date, slates, slates.length);
+
   const persistResult = await persistDraftKingsClassicSlate({
     date,
     artifactDir,
@@ -460,6 +467,24 @@ export const loadDraftKingsClassicSlate = async ({
   );
 
   if (selectedGroups.length === 0) {
+    // Try Supabase first — survives Lambda restarts unlike the filesystem artifact.
+    const snapshot = await loadSupabaseDkClassicSnapshot(date);
+    if (snapshot && snapshot.slate_count > 0) {
+      const storedSlates = snapshot.payload as LoadedDraftKingsClassicSlateItem[];
+      const filteredSlates = draftGroupId
+        ? storedSlates.filter((s) => s.draft_group_id === draftGroupId)
+        : storedSlates;
+      if (filteredSlates.length > 0) {
+        return ok({
+          source: "draftkings-classic-supabase",
+          date,
+          generated_at: generatedAt,
+          slates: filteredSlates,
+          note: null
+        });
+      }
+    }
+
     const persisted = await loadPersistedDraftKingsClassicSlate({ date, artifactDir });
 
     if (persisted.success && persisted.data && persisted.data.length > 0) {
@@ -538,7 +563,9 @@ export const loadDraftKingsClassicSlate = async ({
   // Persist ALL successfully fetched same-date slates as the date-keyed fallback.
   // The full inventory is needed so the fallback path can reconstruct the complete
   // salary_slate_inventory when the live upcoming API rotates away from today's groups.
-  // Non-fatal: load continues with live data on persist failure.
+  // Supabase is the primary fallback (survives Lambda restarts); filesystem is secondary.
+  await storeSupabaseDkClassicSnapshot(date, slates, slates.length);
+
   const persistResult = await persistDraftKingsClassicSlate({
     date,
     artifactDir,
