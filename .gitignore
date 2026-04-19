@@ -25,3 +25,7 @@ sss_mlb_*/
 
 # Schema draft history at repo root
 sss_mlb_projection_schema_v*.sql
+
+# Local operator-only files
+mlb_projection_app_operator_inventory.xlsx
+run-final-window-proof.ps1
