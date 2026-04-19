@@ -41,7 +41,7 @@ const computeProjectedIp = (pitcher: PreparedPitcherInputs, opponentTeam: Prepar
   const pitchCountFactor = clamp(lastStartPitches / 95, 0.88, 1.08);
   const lineupFactor = clamp(opponentTeam.lineup_batters_available / 9, 0.8, 1);
 
-  return round2(clamp(pitcher.recent_ip_per_start * restFactor * pitchCountFactor * lineupFactor, 3.5, 7.5));
+  return round2(clamp(pitcher.recent_ip_per_start * restFactor * pitchCountFactor * lineupFactor, 1.0, 7.5));
 };
 
 const buildPitcherProjection = (
@@ -71,7 +71,9 @@ const buildPitcherProjection = (
       : average([pitcher.season_k_per_9, pitcher.recent_k_per_9]);
 
   const opponentKModifier = clamp((opponentTeam.team_k_rate ?? BASELINE_K_RATE) / BASELINE_K_RATE, 0.8, 1.2);
-  const opponentRunModifier = clamp((opponentTeam.team_runs_per_game ?? BASELINE_RUNS_PER_GAME) / BASELINE_RUNS_PER_GAME, 0.8, 1.2);
+  // environmentModifier is derived from projectTeamRuns output, which already incorporates
+  // team_runs_per_game through offenseFactor. A separate opponentRunModifier (raw team RPG)
+  // would count the opponent's offensive strength twice and inflate ER variance.
   const environmentModifier = clamp(opponentRuns / BASELINE_RUNS_PER_GAME, 0.75, 1.3);
   const walkModifier = clamp((opponentTeam.team_bb_rate ?? BASELINE_BB_RATE) / BASELINE_BB_RATE, 0.8, 1.2);
 
@@ -84,7 +86,7 @@ const buildPitcherProjection = (
       : average([pitcher.season_era, pitcher.recent_era]);
 
   const projectedEr = round2(
-    clamp(projectedIp * (blendedEra / 9) * opponentRunModifier * environmentModifier, 0, opponentRuns)
+    clamp(projectedIp * (blendedEra / 9) * environmentModifier, 0, opponentRuns)
   );
 
   const projectedHits = round2(

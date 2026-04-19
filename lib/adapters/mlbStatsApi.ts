@@ -601,9 +601,13 @@ const buildPreparedStarter = (
     const gamesStarted = parseIntegerLike(gamePitching?.gamesStarted);
     const seasonGamesStarted = parseIntegerLike(seasonPitching?.gamesStarted);
     const seasonInningsPitched = parseBaseballInnings(seasonPitching?.inningsPitched);
+    // Cap per-start IP estimate when sample is tiny (< 3 starts): total season IP
+    // includes relief appearances and fluky long outings that inflate the ratio.
     const recentIpPerStart =
       seasonInningsPitched !== null && seasonGamesStarted !== null && seasonGamesStarted > 0
-        ? seasonInningsPitched / seasonGamesStarted
+        ? seasonGamesStarted < 3
+          ? Math.min(seasonInningsPitched / seasonGamesStarted, 6.0)
+          : seasonInningsPitched / seasonGamesStarted
         : null;
 
     if (!playerRecord || !playerId || gamesStarted !== 1) {
@@ -745,7 +749,9 @@ export const buildPreparedStarterFromPeopleStats = (
   const seasonGs = parseIntegerLike(stat.gamesStarted);
   const recentIpPerStart =
     seasonIp !== null && seasonGs !== null && seasonGs > 0
-      ? seasonIp / seasonGs
+      ? seasonGs < 3
+        ? Math.min(seasonIp / seasonGs, 6.0)
+        : seasonIp / seasonGs
       : null;
 
   return {

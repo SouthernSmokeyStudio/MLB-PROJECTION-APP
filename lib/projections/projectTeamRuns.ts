@@ -32,13 +32,26 @@ const computeTeamOffenseFactor = (
   teamWoba: number,
   lineupAvgWoba: number | null
 ): number => {
-  const lineupComponent = lineupAvgWoba ?? teamWoba;
+  // When today's lineup is known, blend three signals: season RPG, season wOBA,
+  // and today's lineup wOBA. When lineup is unknown, use only the two season
+  // signals — defaulting lineupComponent to teamWoba would double-weight wOBA
+  // and under-weight the runs-per-game signal.
+  if (lineupAvgWoba === null) {
+    return clamp(
+      average([
+        teamRunsPerGame / BASE_LEAGUE_RUNS_PER_GAME,
+        teamWoba / BASE_LEAGUE_WOBA
+      ]),
+      0.75,
+      1.35
+    );
+  }
 
   return clamp(
     average([
       teamRunsPerGame / BASE_LEAGUE_RUNS_PER_GAME,
       teamWoba / BASE_LEAGUE_WOBA,
-      lineupComponent / BASE_LEAGUE_WOBA
+      lineupAvgWoba / BASE_LEAGUE_WOBA
     ]),
     0.75,
     1.35
