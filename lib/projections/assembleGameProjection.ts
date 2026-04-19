@@ -16,6 +16,13 @@ export interface AssembledGameProjection {
   readonly home_pitcher: PitcherProjection | null;
   readonly away_batters: readonly BatterProjection[];
   readonly home_batters: readonly BatterProjection[];
+  /**
+   * True when the team run engine itself failed (missing park factor, starters,
+   * or team stats). In this case projected_runs === 0 and simulation must not run.
+   * Distinct from metadata.blocked, which can be true for batter-only reasons
+   * while team-level numbers remain valid.
+   */
+  readonly team_runs_blocked: boolean;
 }
 
 const PROJECTION_VERSION = {
@@ -76,6 +83,7 @@ export const assembleGameProjection = (inputs: PreparedGameInputs): AssembledGam
     away_pitcher: pitcherProjection.away_pitcher,
     home_pitcher: pitcherProjection.home_pitcher,
     away_batters: batterProjection.away_batters,
-    home_batters: batterProjection.home_batters
+    home_batters: batterProjection.home_batters,
+    team_runs_blocked: teamRuns.blocked.is_blocked
   };
 };

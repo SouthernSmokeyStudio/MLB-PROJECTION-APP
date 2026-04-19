@@ -90,10 +90,13 @@ export const buildGameCard = (
     metadata: gameProjection.metadata
   });
 
-  // When team_level_ready is true, strip the metadata.blocked from the game
-  // projection before passing to simulateGames.  The combined metadata.blocked
-  // includes batter-level reasons that are irrelevant for team-level simulation.
-  const simulations = preparedInputs.team_level_ready
+  // Guard on team_level_ready AND !team_runs_blocked.
+  // team_runs_blocked is true only when the run engine itself failed (missing
+  // park factor, starters, or team stats) — in that case projected_runs === 0
+  // and simulation would produce a degenerate 50/50 distribution.
+  // metadata.blocked can be true for batter-only reasons while team-level
+  // numbers remain valid; those games should still simulate.
+  const simulations = preparedInputs.team_level_ready && !assembled.team_runs_blocked
     ? simulateGames(
         {
           away: gameProjection.away,
@@ -147,11 +150,11 @@ export const buildGameCard = (
     projection_lineage: projectionLineage,
     deterministic: {
       derived_from: "deterministic",
-      projected_away_runs: preparedInputs.team_level_ready ? gameProjection.away.projected_runs : null,
-      projected_home_runs: preparedInputs.team_level_ready ? gameProjection.home.projected_runs : null,
-      projected_total: preparedInputs.team_level_ready ? gameProjection.projected_total : null,
-      away_pitcher: preparedInputs.team_level_ready ? assembled.away_pitcher : null,
-      home_pitcher: preparedInputs.team_level_ready ? assembled.home_pitcher : null
+      projected_away_runs: preparedInputs.team_level_ready && !assembled.team_runs_blocked ? gameProjection.away.projected_runs : null,
+      projected_home_runs: preparedInputs.team_level_ready && !assembled.team_runs_blocked ? gameProjection.home.projected_runs : null,
+      projected_total: preparedInputs.team_level_ready && !assembled.team_runs_blocked ? gameProjection.projected_total : null,
+      away_pitcher: preparedInputs.team_level_ready && !assembled.team_runs_blocked ? assembled.away_pitcher : null,
+      home_pitcher: preparedInputs.team_level_ready && !assembled.team_runs_blocked ? assembled.home_pitcher : null
     },
     simulation: simulations
       ? {

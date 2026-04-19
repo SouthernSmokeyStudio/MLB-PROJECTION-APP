@@ -16,6 +16,7 @@ import {
 import { assembleGameProjection } from "../../lib/projections/assembleGameProjection";
 import { projectBatters } from "../../lib/projections/projectBatters";
 import { projectTeamRuns } from "../../lib/projections/projectTeamRuns";
+import { buildGameCard } from "../../lib/services/buildGameCard";
 
 const prepared = preparedFixture as unknown as PreparedGameInputs;
 const invalidPrepared = invalidPreparedFixture as unknown as PreparedGameInputs;
@@ -246,5 +247,96 @@ describe("BF-002 — assembleGameProjection with partial batters", () => {
     expect(assembled.game_projection.metadata.blocked.blocked_reason).toContain(
       "Zero projectable batters"
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Regression: projectBatters — zero-PA debut batter never produces NaN sb
+// ---------------------------------------------------------------------------
+
+describe("projectBatters — zero-PA debut batter", () => {
+  it("returns projected_sb = 0 (not NaN) for a confirmed-order batter with season_pa = 0", () => {
+    // Represents a player who just debuted: in today's lineup, but no recorded PA yet.
+    const debutBatter: PreparedBatterInputs = {
+      ...makeCompleteBatter("debut-player", "team-away", 9),
+      season_pa: 0,
+      season_sb: 0,
+      season_avg: 0,
+      season_obp: 0,
+      season_slg: 0,
+      season_woba: null,
+      season_bb_rate: 0,
+      season_hr_rate: 0,
+      season_iso: 0,
+      lineup_status: "confirmed_order"
+    };
+
+    const awayBatters = [
+      ...makeFullLineup("team-away").slice(0, 8),
+      debutBatter
+    ];
+
+    const result = projectBatters(makeSyntheticInputs({ away_batters: awayBatters }));
+
+    const debut = result.away_batters.find(b => b.player_id === "debut-player");
+    expect(debut).toBeDefined();
+    expect(Number.isFinite(debut!.projected_sb)).toBe(true);
+    expect(debut!.projected_sb).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Regression: buildGameCard — team-run-blocked game must not surface 0-runs
+// as deterministic output or run simulation on degenerate (0, 0) inputs.
+//
+// "team-level blocked" means projectTeamRuns itself failed (missing park factor,
+// starters, or team stats). This is distinct from metadata.blocked being true
+// due to batter-level reasons — in that case team runs are valid and simulation
+// SHOULD still run (tested separately in team-level-readiness.test.ts).
+// ---------------------------------------------------------------------------
+
+describe("buildGameCard — team-run-blocked game (venue: null)", () => {
+  it("assembleGameProjection sets team_runs_blocked = true when venue is null", () => {
+    const assembled = assembleGameProjection(makeSyntheticInputs({ venue: null }));
+
+    expect(assembled.team_runs_blocked).toBe(true);
+    expect(assembled.game_projection.away.projected_runs).toBe(0);
+    expect(assembled.game_projection.home.projected_runs).toBe(0);
+  });
+
+  it("surfaces null deterministic runs (not 0) when team runs are blocked", () => {
+    // venue: null → projectTeamRuns returns blocked → projected_runs coerced to 0.
+    // buildGameCard must not surface that 0 as a real projection.
+    const card = buildGameCard(makeSyntheticInputs({ venue: null, team_level_ready: true }));
+
+    expect(card.blocked.is_blocked).toBe(true);
+    expect(card.deterministic.projected_away_runs).toBeNull();
+    expect(card.deterministic.projected_home_runs).toBeNull();
+    expect(card.deterministic.projected_total).toBeNull();
+    expect(card.deterministic.away_pitcher).toBeNull();
+    expect(card.deterministic.home_pitcher).toBeNull();
+  });
+
+  it("simulation is null when team runs are blocked (avoids degenerate 50/50 output)", () => {
+    const card = buildGameCard(
+      makeSyntheticInputs({ venue: null, team_level_ready: true }),
+      { simulation: { seed: 42, iterations: 100 } }
+    );
+
+    expect(card.simulation).toBeNull();
+  });
+
+  it("unblocked game with team_level_ready surfaces real runs and simulation", () => {
+    const card = buildGameCard(
+      makeSyntheticInputs({ team_level_ready: true }),
+      { simulation: { seed: 42, iterations: 100 } }
+    );
+
+    expect(card.blocked.is_blocked).toBe(false);
+    expect(card.deterministic.projected_away_runs).not.toBeNull();
+    expect((card.deterministic.projected_away_runs ?? 0)).toBeGreaterThan(0);
+    expect(card.deterministic.projected_total).not.toBeNull();
+    expect(card.simulation).not.toBeNull();
+    expect(card.simulation?.average_total_runs).toBeGreaterThan(0);
   });
 });

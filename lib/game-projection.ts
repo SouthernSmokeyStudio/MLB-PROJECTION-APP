@@ -290,7 +290,7 @@ export const parseGameProjection = (value: unknown): GameProjection => {
  * Throws with a descriptive message on any schema violation.
  */
 const ASSEMBLED_ROOT_KEYS = [
-  "game_projection", "away_pitcher", "home_pitcher", "away_batters", "home_batters"
+  "game_projection", "away_pitcher", "home_pitcher", "away_batters", "home_batters", "team_runs_blocked"
 ] as const;
 
 export const parseAssembledGameProjection = (value: unknown): AssembledGameProjection => {
@@ -307,6 +307,10 @@ export const parseAssembledGameProjection = (value: unknown): AssembledGameProje
   }
   if (!Array.isArray(homeBattersRaw)) {
     throw new Error("Assembled game projection home_batters must be an array.");
+  }
+
+  if (typeof value.team_runs_blocked !== "boolean") {
+    throw new Error("Assembled game projection team_runs_blocked must be a boolean.");
   }
 
   return {
@@ -330,6 +334,7 @@ export const parseAssembledGameProjection = (value: unknown): AssembledGameProje
           `Assembled game projection home_batters[${i}]: ${err instanceof Error ? err.message : String(err)}`
         );
       }
-    })
+    }),
+    team_runs_blocked: value.team_runs_blocked as boolean
   };
 };
