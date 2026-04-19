@@ -227,30 +227,55 @@ export const loadDraftKingsSportsbookMlbMoneylineSlate = async ({
   );
 
   const snapshot = await loadSupabaseDkMoneylineSnapshot(date);
-  const storedCount = snapshot?.entry_count ?? 0;
+  const storedEntries = snapshot?.payload.entries ?? [];
 
-  if (storedCount > liveCount) {
-    // Merge: for each stored game, use the live entry (fresh odds) if still pregame,
-    // otherwise keep the stored entry (pre-game odds for games that have started).
-    const mergedEntries = snapshot!.payload.entries.map((stored) => {
+  if (snapshot && storedEntries.length > 0) {
+    // Always merge when a snapshot exists.  Live entries provide current odds for
+    // still-pregame games; stored entries fill in games that have already started
+    // (DK rotates those out of the live feed permanently at first pitch).
+    //
+    // This replaces the old `storedCount > liveCount` guard which was brittle:
+    // if the snapshot was written after some games started, storedCount could
+    // equal liveCount and the merge would silently skip started games.
+    const mergedFromStored = storedEntries.map((stored) => {
       const key = `${stored.away_team_abbreviation}:${stored.home_team_abbreviation}`;
       return liveByKey.get(key) ?? stored;
     });
 
-    const mergedSlate = { ...snapshot!.payload, entries: mergedEntries };
-    const startedCount = storedCount - liveCount;
+    // Include any live entries that aren't in the stored snapshot yet (e.g.
+    // the snapshot predates a late-added game).
+    const storedKeys = new Set(
+      storedEntries.map((e) => `${e.away_team_abbreviation}:${e.home_team_abbreviation}`)
+    );
+    const extraLiveEntries = filteredEntries.filter(
+      (e) => !storedKeys.has(`${e.away_team_abbreviation}:${e.home_team_abbreviation}`)
+    );
+    const mergedEntries = [...mergedFromStored, ...extraLiveEntries];
 
+    // Persist the expanded list so the next request also sees the new games.
+    if (extraLiveEntries.length > 0) {
+      await storeSupabaseDkMoneylineSnapshot(date, {
+        ...snapshot.payload,
+        entries: mergedEntries
+      });
+    }
+
+    const startedCount = mergedEntries.length - liveCount;
     return ok({
       source: "draftkings-sportsbook-mlb-moneyline-supabase",
       date,
       generated_at: generatedAt,
-      moneyline_slate: mergedSlate,
-      note: `Merged: ${liveCount} live (current odds) + ${startedCount} stored (pre-game odds for started games).`
+      moneyline_slate: { ...snapshot.payload, entries: mergedEntries },
+      note:
+        startedCount > 0
+          ? `Merged: ${liveCount} live (current odds) + ${startedCount} stored (pre-game odds for started games).`
+          : null
     });
   }
 
+  // No usable snapshot yet.
   if (liveCount === 0) {
-    // No live entries and Supabase is empty — try filesystem last.
+    // No live entries either — try filesystem last.
     const persisted = await loadPersistedArtifact({ date, artifactDir });
     if (persisted.success && persisted.data) {
       return ok({
@@ -270,11 +295,9 @@ export const loadDraftKingsSportsbookMlbMoneylineSlate = async ({
     });
   }
 
-  // Live has more (or equal) entries — store to Supabase so future merges have
-  // the full slate. await ensures the write completes before the Lambda exits.
-  if (liveCount > storedCount) {
-    await storeSupabaseDkMoneylineSnapshot(date, { ...fetched.data, entries: filteredEntries });
-  }
+  // First request of the day with live entries — seed the snapshot so future
+  // requests can merge started games against this full pregame baseline.
+  await storeSupabaseDkMoneylineSnapshot(date, { ...fetched.data, entries: filteredEntries });
 
   return ok({
     source: "draftkings-sportsbook-mlb-moneyline-live",

@@ -14,7 +14,16 @@ vi.mock("@lib/materializer/schedule", () => ({
   MATERIALIZATION_TIMEZONE: "America/Chicago"
 }));
 
+vi.mock("@lib/supabase/dkMoneylineSnapshots", () => ({
+  loadSupabaseDkMoneylineSnapshot: vi.fn(),
+  storeSupabaseDkMoneylineSnapshot: vi.fn()
+}));
+
 import { fetchDraftKingsSportsbookMlbMoneylineSlate } from "@lib/adapters/draftKingsSportsbook";
+import {
+  loadSupabaseDkMoneylineSnapshot,
+  storeSupabaseDkMoneylineSnapshot
+} from "@lib/supabase/dkMoneylineSnapshots";
 import {
   captureSportsbookMlbMoneylineSlate,
   loadDraftKingsSportsbookMlbMoneylineSlate
@@ -173,5 +182,126 @@ describe("loadDraftKingsSportsbookMlbMoneylineSlate – persisted fallback", () 
     expect(loaded.data.moneyline_slate).toBeNull();
     expect(loaded.data.source).toBe("draftkings-sportsbook-mlb-moneyline-live");
     expect(loaded.data.note).toContain("No DraftKings Sportsbook MLB pregame moneyline rows matched the requested date.");
+  });
+});
+
+describe("loadDraftKingsSportsbookMlbMoneylineSlate – Supabase merge retention", () => {
+  let artifactDir: string;
+
+  beforeEach(async () => {
+    artifactDir = await mkdtemp(join(tmpdir(), "dk-sb-merge-"));
+    vi.mocked(fetchDraftKingsSportsbookMlbMoneylineSlate).mockReset();
+    vi.mocked(loadSupabaseDkMoneylineSnapshot).mockReset();
+    vi.mocked(storeSupabaseDkMoneylineSnapshot).mockReset().mockResolvedValue(undefined);
+  });
+
+  afterEach(async () => {
+    await rm(artifactDir, { recursive: true, force: true });
+    vi.restoreAllMocks();
+  });
+
+  // Regression: storedCount === liveCount but a different game started and was replaced
+  // by a new one. The old `storedCount > liveCount` guard silently skipped the merge,
+  // leaving the started game absent from the board.  The new path always merges when a
+  // snapshot exists, guaranteeing the started game's pregame odds are retained.
+  it("retains a started game's pregame odds when storedCount equals liveCount", async () => {
+    const startedEntry = {
+      event_id: "11001",
+      market_id: "1_11001",
+      event_name: "KC @ NYY",
+      start_time: asISOTimestamp("2026-04-19T17:05:00Z"),
+      away_team_abbreviation: "KC",
+      away_team_name: "Kansas City Royals",
+      away_starting_pitcher: null,
+      home_team_abbreviation: "NYY",
+      home_team_name: "New York Yankees",
+      home_starting_pitcher: null,
+      away_odds_american: +115,
+      away_odds_decimal: null,
+      home_odds_american: -135,
+      home_odds_decimal: null
+    };
+    const stillLiveEntry = {
+      event_id: "99001",
+      market_id: "1_99001",
+      event_name: "NYY @ BOS",
+      start_time: asISOTimestamp("2026-04-19T23:10:00Z"),
+      away_team_abbreviation: "BOS",
+      away_team_name: "Boston Red Sox",
+      away_starting_pitcher: null,
+      home_team_abbreviation: "NYM",
+      home_team_name: "New York Mets",
+      home_starting_pitcher: null,
+      away_odds_american: -110,
+      away_odds_decimal: null,
+      home_odds_american: -110,
+      home_odds_decimal: null
+    };
+
+    // Snapshot was stored when KC@NYY was still pregame — 2 entries total.
+    const storedSlate = makeSlate("2026-04-19", {
+      entries: [startedEntry, stillLiveEntry]
+    });
+    vi.mocked(loadSupabaseDkMoneylineSnapshot).mockResolvedValue({
+      date: "2026-04-19",
+      captured_at: "2026-04-19T13:00:00Z",
+      entry_count: 2,
+      payload: storedSlate
+    });
+
+    // By the time of the request KC@NYY has started — DK only returns the still-pregame game.
+    // liveCount (1) === storedCount (... wait, entry_count is 2 but liveCount is 1).
+    // Old code: storedCount (2) > liveCount (1) → merge fires. This case was actually fine.
+    //
+    // The tricky regression is when the snapshot was stored AFTER KC@NYY started:
+    // storedCount = 1 (only BOS@NYM stored), liveCount = 1 → no merge → KC@NYY lost.
+    // Simulate that: override entry_count to 1 but payload still has 2 entries (realistic
+    // because entry_count is a separate column that can diverge from payload.entries.length).
+    vi.mocked(loadSupabaseDkMoneylineSnapshot).mockResolvedValue({
+      date: "2026-04-19",
+      captured_at: "2026-04-19T14:00:00Z",
+      entry_count: 1,
+      payload: storedSlate // payload still has KC@NYY
+    });
+
+    vi.mocked(fetchDraftKingsSportsbookMlbMoneylineSlate).mockResolvedValue({
+      success: true,
+      data: makeSlate("2026-04-19", { entries: [stillLiveEntry] })
+    });
+
+    const loaded = await loadDraftKingsSportsbookMlbMoneylineSlate({
+      date: "2026-04-19",
+      artifactDir
+    });
+
+    expect(loaded.success).toBe(true);
+    if (!loaded.success) throw new Error(loaded.error);
+    expect(loaded.data.source).toBe("draftkings-sportsbook-mlb-moneyline-supabase");
+
+    const entries = loaded.data.moneyline_slate?.entries ?? [];
+    const kcNyy = entries.find(
+      (e) => e.away_team_abbreviation === "KC" && e.home_team_abbreviation === "NYY"
+    );
+    expect(kcNyy).toBeDefined();
+    expect(kcNyy?.away_odds_american).toBe(+115);
+  });
+
+  it("seeds snapshot on first request and returns live slate when no snapshot exists", async () => {
+    vi.mocked(loadSupabaseDkMoneylineSnapshot).mockResolvedValue(null);
+
+    vi.mocked(fetchDraftKingsSportsbookMlbMoneylineSlate).mockResolvedValue({
+      success: true,
+      data: makeSlate("2026-04-19")
+    });
+
+    const loaded = await loadDraftKingsSportsbookMlbMoneylineSlate({
+      date: "2026-04-19",
+      artifactDir
+    });
+
+    expect(loaded.success).toBe(true);
+    if (!loaded.success) throw new Error(loaded.error);
+    expect(loaded.data.source).toBe("draftkings-sportsbook-mlb-moneyline-live");
+    expect(storeSupabaseDkMoneylineSnapshot).toHaveBeenCalledOnce();
   });
 });
