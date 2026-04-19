@@ -14,10 +14,11 @@ const MONEYLINE_SUBCATEGORY_ID = "4519";
 // BF-004: DraftKings shortName → canonical team abbreviation normalization
 // ---------------------------------------------------------------------------
 // DraftKings sportsbook participant metadata.shortName uses abbreviations
-// that diverge from our canonical TEAM_METADATA for 3 teams:
+// that diverge from our canonical TEAM_METADATA for 4 teams:
 //   WAS → WSH  (Washington Nationals)
 //   A's → ATH  (Athletics)
 //   SFG → SF   (San Francisco Giants)
+//   NY  → NYY  (New York Yankees — DK uses "NY" shortName, not "NYY")
 //
 // This map is applied at parse time so the internal contract always carries
 // canonical abbreviations. The join logic remains strict equality — no
@@ -34,7 +35,8 @@ const CANONICAL_TEAM_ABBREVIATIONS: ReadonlySet<string> = new Set([
 const DK_SHORTNAME_TO_CANONICAL: Readonly<Record<string, string>> = {
   "WAS": "WSH",
   "A's": "ATH",
-  "SFG": "SF"
+  "SFG": "SF",
+  "NY":  "NYY"
 };
 
 /**

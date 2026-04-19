@@ -3,6 +3,7 @@ import type {
   DraftKingsSportsbookMlbMoneylineSlate
 } from "@lib/contracts/draftkings-sportsbook-mlb-moneyline";
 import type { GameStatus, ISOTimestamp } from "@lib/contracts/types";
+import { normalizeDkTeamAbbreviation } from "@lib/adapters/draftKingsSportsbook";
 import { buildGameCard, type BuildGameCardOptions, type GameCard } from "./buildGameCard";
 import type { LiveSlateSourceGame } from "./loadLiveSlate";
 
@@ -108,10 +109,17 @@ const buildJoinCandidates = ({
     (entry) => {
       const marketStartTime = Date.parse(entry.start_time);
 
+      // Normalize stored abbreviations at join time: entries captured before a
+      // BF-004 mapping was added may carry the pre-fix raw value (e.g. "NY"
+      // instead of "NYY"). normalizeDkTeamAbbreviation is idempotent — already-
+      // canonical values pass through unchanged.
+      const awayAbbr = normalizeDkTeamAbbreviation(entry.away_team_abbreviation).canonical;
+      const homeAbbr = normalizeDkTeamAbbreviation(entry.home_team_abbreviation).canonical;
+
       return (
         Number.isFinite(marketStartTime) &&
-        entry.away_team_abbreviation === sourceGame.canonicalGame.away.team.abbreviation &&
-        entry.home_team_abbreviation === sourceGame.canonicalGame.home.team.abbreviation &&
+        awayAbbr === sourceGame.canonicalGame.away.team.abbreviation &&
+        homeAbbr === sourceGame.canonicalGame.home.team.abbreviation &&
         Math.abs(marketStartTime - scheduledStartTime) <=
           MONEYLINE_START_TIME_JOIN_WINDOW_MS
       );

@@ -419,6 +419,12 @@ describe("BF-004 — DraftKings team abbreviation normalization", () => {
     expect(result.drift_warning).toBeNull();
   });
 
+  it("normalizes DK shortName 'NY' to canonical 'NYY' (New York Yankees)", () => {
+    const result = normalizeDkTeamAbbreviation("NY");
+    expect(result.canonical).toBe("NYY");
+    expect(result.drift_warning).toBeNull();
+  });
+
   it("passes through already-canonical 'LAA' unchanged", () => {
     const result = normalizeDkTeamAbbreviation("LAA");
     expect(result.canonical).toBe("LAA");
@@ -516,6 +522,19 @@ describe("BF-004 — adapter parse normalization", () => {
     expect(result.success).toBe(true);
     if (!result.success) throw new Error(result.error);
     expect(result.data.entries[0]?.away_team_abbreviation).toBe("ATH");
+  });
+
+  it("DK shortName 'NY' is normalized to 'NYY' in parsed contract", () => {
+    const payload = buildDkPayloadWithShortNames("KC", "NY");
+    const result = parseDraftKingsSportsbookMlbMoneylineSlate({
+      fetchedAt: asISOTimestamp("2026-04-06T17:00:00Z"),
+      payload
+    });
+
+    expect(result.success).toBe(true);
+    if (!result.success) throw new Error(result.error);
+    expect(result.data.entries[0]?.away_team_abbreviation).toBe("KC");
+    expect(result.data.entries[0]?.home_team_abbreviation).toBe("NYY");
   });
 
   it("drift visibility: console.warn fires for unrecognized shortName", () => {
@@ -670,9 +689,40 @@ describe("BF-004 — end-to-end join proof: raw DK shortName → parse → join 
     expect(joined.games[0]?.draftkings_sportsbook_moneyline.blocked.is_blocked).toBe(false);
   });
 
-  it("negative control: raw DK 'WAS' without normalization would NOT join against canonical WSH", () => {
-    // Prove the join would fail if the adapter passed through "WAS" unnormalized.
-    // We hand-build a slate with raw "WAS" (bypassing the adapter) and show it fails.
+  it("raw DK 'NY' → adapter normalizes to 'NYY' → join against canonical NYY succeeds", () => {
+    // KC@NYY regression: DK sportsbook uses "NY" as the Yankees shortName.
+    // The adapter now maps "NY" → "NYY" at parse time.
+    const rawPayload = buildDkPayloadWithShortNames("KC", "NY");
+    const parsedSlate = parseDraftKingsSportsbookMlbMoneylineSlate({
+      fetchedAt: asISOTimestamp("2026-04-19T17:00:00Z"),
+      payload: rawPayload
+    });
+    expect(parsedSlate.success).toBe(true);
+    if (!parsedSlate.success) throw new Error(parsedSlate.error);
+
+    // Verify normalization happened at parse time
+    expect(parsedSlate.data.entries[0]?.away_team_abbreviation).toBe("KC");
+    expect(parsedSlate.data.entries[0]?.home_team_abbreviation).toBe("NYY");
+
+    const syntheticSource = buildSourceGameWithTeams(
+      "KC", "NYY",
+      "2026-04-06T20:10:00Z"
+    );
+
+    const joined = joinDraftKingsSportsbookMoneylines({
+      sourceGames: [syntheticSource],
+      moneylineSlate: parsedSlate.data,
+      options: { simulation: { seed: 17, iterations: 250 } }
+    });
+
+    expect(joined.ready_games).toBe(1);
+    expect(joined.held_games).toBe(0);
+    expect(joined.games[0]?.draftkings_sportsbook_moneyline.blocked.is_blocked).toBe(false);
+  });
+
+  it("negative control: truly unrecognized shortName ('XYZZY') still blocks the join", () => {
+    // Even with join-level normalization, a shortName that has no known mapping
+    // passes through as-is. "XYZZY" ≠ any canonical abbreviation → join fails.
     const syntheticSource = buildSourceGameWithTeams(
       "WSH", "BOS",
       "2026-04-06T20:10:00Z"
@@ -680,7 +730,7 @@ describe("BF-004 — end-to-end join proof: raw DK shortName → parse → join 
 
     const slateThatBypassesAdapter = makeMoneylineSlate([
       {
-        away_team_abbreviation: "WAS", // raw DK value, not normalized
+        away_team_abbreviation: "XYZZY", // unrecognizable — no mapping exists
         home_team_abbreviation: "BOS",
         start_time: asISOTimestamp("2026-04-06T20:10:00Z")
       }
@@ -692,10 +742,39 @@ describe("BF-004 — end-to-end join proof: raw DK shortName → parse → join 
       options: { simulation: { seed: 17, iterations: 250 } }
     });
 
-    // Without normalization, "WAS" !== "WSH" → join fails
+    // "XYZZY" cannot be normalized to "WSH" → join fails
     expect(joined.ready_games).toBe(0);
     expect(joined.held_games).toBe(1);
     expect(joined.games[0]?.draftkings_sportsbook_moneyline.blocked.is_blocked).toBe(true);
+  });
+
+  it("legacy stored snapshot with 'NY' abbreviation resolves via join-level normalization", () => {
+    // KC@NYY 2026-04-19 regression: the Supabase snapshot was stored before the
+    // "NY" → "NYY" adapter mapping was added, so the stored entry carries "NY".
+    // The join applies normalizeDkTeamAbbreviation defensively, turning "NY" into
+    // "NYY" at match time so the legacy snapshot resolves without a re-capture.
+    const syntheticSource = buildSourceGameWithTeams(
+      "KC", "NYY",
+      "2026-04-06T20:10:00Z"
+    );
+
+    const legacyStoredSlate = makeMoneylineSlate([
+      {
+        away_team_abbreviation: "KC",
+        home_team_abbreviation: "NY",  // stored before adapter fix
+        start_time: asISOTimestamp("2026-04-06T20:10:00Z")
+      }
+    ]);
+
+    const joined = joinDraftKingsSportsbookMoneylines({
+      sourceGames: [syntheticSource],
+      moneylineSlate: legacyStoredSlate,
+      options: { simulation: { seed: 17, iterations: 250 } }
+    });
+
+    expect(joined.ready_games).toBe(1);
+    expect(joined.held_games).toBe(0);
+    expect(joined.games[0]?.draftkings_sportsbook_moneyline.blocked.is_blocked).toBe(false);
   });
 });
 
