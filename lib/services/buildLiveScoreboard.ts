@@ -22,11 +22,11 @@ const buildBlockedState = (
   const { status } = sourceGame.canonicalGame;
   const scoreState = sourceGame.liveScoreState;
 
-  if ((status === "in_progress" || status === "final") &&
+if (status === "in_progress" &&
       (scoreState.away_score === null || scoreState.home_score === null)) {
     return {
       is_blocked: true,
-      blocked_reason: "Live score state is missing away/home score for a live or final game."
+      blocked_reason: "Live score state is missing away/home score for a live game."
     };
   }
 

@@ -889,6 +889,31 @@ describe("app surface shell", () => {
 
     expect(formatStatusRailBadge(blockedGame)).toBe("Score blocked");
     expect(formatStatusRailPrimaryMeta(blockedGame)).toContain("missing inning context");
+
+    // KC @ NYY regression: a final game with unavailable score data must show
+    // "Final" in the badge, not "Score blocked".  Before the fix in
+    // buildBlockedState, any final game with null scores was marked is_blocked
+    // which made the ribbon badge read "Score blocked" for a completed game.
+    const finalKcNyy: typeof scheduledGame = {
+      ...scheduledGame,
+      game_id: "mlb-2026-04-19-kc-nyy" as typeof scheduledGame.game_id,
+      status: "final" as const,
+      away_team_abbreviation: "KC",
+      home_team_abbreviation: "NYY",
+      away_score: null,
+      home_score: null,
+      is_live: false,
+      is_final: true,
+      display_state: "Final",
+      blocked: {
+        is_blocked: false,
+        blocked_reason: null
+      }
+    };
+
+    expect(formatStatusRailMatchup(finalKcNyy)).toBe("KC at NYY");
+    expect(formatStatusRailBadge(finalKcNyy)).toBe("Final");
+    expect(formatStatusRailPrimaryMeta(finalKcNyy)).toBe("Final");
   });
 
   it("keeps the shell formatting helpers honest", () => {
