@@ -17,6 +17,9 @@ export interface BatterProjectionResult {
 const BASELINE_WOBA = 0.32;
 const BASELINE_ERA = 4.2;
 const BASELINE_BB_RATE = 0.085;
+// Minimum recent-games sample before trusting the recency signal.
+// Fewer than 5 games is noise; at 5+ the signal adds real information.
+const RECENT_FORM_MIN_GAMES = 5;
 
 const PA_BY_SLOT: Record<number, number> = {
   1: 4.85,
@@ -76,6 +79,25 @@ const getMatchupWoba = (batter: PreparedBatterInputs, pitcherHandedness: Handedn
   }
 
   return batter.season_woba;
+};
+
+// Blend recent form into the matchup wOBA when a credible sample is available.
+// Recent wOBA is weighted at 30% / season matchup wOBA at 70% to avoid
+// over-reacting to small samples while still capturing genuine hot/cold streaks.
+// Clamped ±25% to prevent a single anomalous stretch from dominating the projection.
+const blendRecentForm = (
+  matchupWoba: number,
+  batter: PreparedBatterInputs
+): number => {
+  if (
+    batter.recent_woba === null ||
+    batter.recent_games_n === null ||
+    batter.recent_games_n < RECENT_FORM_MIN_GAMES
+  ) {
+    return matchupWoba;
+  }
+  const blended = 0.7 * matchupWoba + 0.3 * batter.recent_woba;
+  return clamp(blended, matchupWoba * 0.75, matchupWoba * 1.25);
 };
 
 const buildFallbackProjectionSlots = (
@@ -158,8 +180,10 @@ const buildTeamBatterProjection = (
       batter.season_woba ??
       BASELINE_WOBA;
 
+    const effectiveMatchupWoba = blendRecentForm(matchupWoba, batter);
+
     const matchupFactor = clamp(
-      (matchupWoba / BASELINE_WOBA) * (opponentPitcher.season_era / BASELINE_ERA),
+      (effectiveMatchupWoba / BASELINE_WOBA) * (opponentPitcher.season_era / BASELINE_ERA),
       0.75,
       1.3
     );
@@ -199,13 +223,13 @@ const buildTeamBatterProjection = (
     const projectedRuns = round2(
       teamProjectedRuns *
         (RUN_SHARE_BY_SLOT[projectionSlot] ?? 0.09) *
-        clamp((batter.season_obp ?? 0.32) / 0.32, 0.8, 1.2)
+        clamp(effectiveMatchupWoba / BASELINE_WOBA, 0.8, 1.2)
     );
 
     const projectedRbi = round2(
       teamProjectedRuns *
         (RBI_SHARE_BY_SLOT[projectionSlot] ?? 0.08) *
-        clamp(matchupWoba / BASELINE_WOBA, 0.8, 1.2)
+        clamp(effectiveMatchupWoba / BASELINE_WOBA, 0.8, 1.2)
     );
 
     const projectedSb =
