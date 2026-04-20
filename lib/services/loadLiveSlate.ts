@@ -29,6 +29,8 @@ import { normalizeMlbStatsApiGame } from "@lib/normalization/mlbStatsApiNormaliz
 import type { GamePreparationData } from "@lib/preparation";
 import { prepareGameInputs } from "@lib/preparation";
 import { resolveGameSources, applyMergedStartersToCanonical } from "@lib/merge";
+import { fetchVenueWeather } from "@lib/adapters/openMeteo";
+import { VENUE_COORDINATES_BY_TEAM } from "@lib/config/venueCoordinates";
 
 const MLB_STATS_API_TEAM_ENDPOINT = "https://statsapi.mlb.com/api/v1/teams";
 
@@ -789,6 +791,47 @@ export const loadLiveSlate = async (
   const liveGames: LiveSlateSourceGame[] = [];
   let boxscoreEnriched = 0;
 
+  // Pre-fetch Open-Meteo forecasts for games where MLB Stats API has no
+  // live weather (all scheduled/pregame games return weather:{}).
+  // Batched by home team so doubleheaders share one fetch.
+  // Always-dome venues get dome_closed:true without a network call.
+  const forecastByHomeTeam = new Map<number, import("@lib/contracts/types").WeatherSummary | null>();
+  {
+    const fetches: Promise<void>[] = [];
+    for (const game of normalizedGames) {
+      if (game.normalizedGame.weather !== null) continue;
+      const homeTeamId = game.parsedGame.teams.home.team.id;
+      if (forecastByHomeTeam.has(homeTeamId)) continue;
+      const coords = VENUE_COORDINATES_BY_TEAM[homeTeamId];
+      if (coords === undefined) {
+        forecastByHomeTeam.set(homeTeamId, null);
+        continue;
+      }
+      if (coords.is_always_dome) {
+        forecastByHomeTeam.set(homeTeamId, {
+          temperature_f: null,
+          wind_speed_mph: null,
+          wind_direction: null,
+          precipitation_chance: null,
+          conditions: null,
+          dome_closed: true,
+        });
+        continue;
+      }
+      fetches.push(
+        fetchVenueWeather(
+          coords.lat,
+          coords.lng,
+          game.normalizedGame.scheduled_start
+        ).then(
+          (weather) => { forecastByHomeTeam.set(homeTeamId, weather); },
+          () => { forecastByHomeTeam.set(homeTeamId, null); }
+        )
+      );
+    }
+    await Promise.allSettled(fetches);
+  }
+
   for (const game of normalizedGames) {
     const [fetchedBoxscore, fetchedLinescore] = await Promise.all([
       fetchMlbStatsApiBoxscore(game.parsedGame.gamePk),
@@ -1029,9 +1072,21 @@ export const loadLiveSlate = async (
       }
     }
 
+    // Fill weather from Open-Meteo forecast when MLB Stats API has none.
+    // MLB live weather wins when non-null; forecast fills the gap.
+    const homeTeamId = game.parsedGame.teams.home.team.id;
+    const forecastWeather =
+      liveCanonical.weather === null
+        ? (forecastByHomeTeam.get(homeTeamId) ?? null)
+        : null;
+    const finalCanonical =
+      forecastWeather !== null
+        ? { ...liveCanonical, weather: forecastWeather }
+        : liveCanonical;
+
     liveGames.push({
       parsedGame: game.parsedGame,
-      canonicalGame: liveCanonical,
+      canonicalGame: finalCanonical,
       preparedGame,
       playerIdentities,
       liveScoreState

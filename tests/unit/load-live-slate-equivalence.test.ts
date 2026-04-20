@@ -24,6 +24,11 @@ vi.mock("@lib/adapters/fetchWithTimeout", () => ({
   fetchWithTimeout: vi.fn()
 }));
 
+// Default: forecast returns null so existing tests are unaffected.
+vi.mock("@lib/adapters/openMeteo", () => ({
+  fetchVenueWeather: vi.fn().mockResolvedValue(null)
+}));
+
 // Mock the entire adapter layer so loadLiveSlate can run without network.
 vi.mock("@lib/adapters/mlbStatsApi", async () => {
   const actual = await vi.importActual<typeof import("@lib/adapters/mlbStatsApi")>(
@@ -48,6 +53,7 @@ import {
   fetchMlbStatsApiPitcherSeasonStats
 } from "../../lib/adapters/mlbStatsApi";
 import { fetchWithTimeout } from "../../lib/adapters/fetchWithTimeout";
+import { fetchVenueWeather } from "../../lib/adapters/openMeteo";
 
 const parsedFixture = parseMlbStatsApiGamePayload(rawFixture);
 if (!parsedFixture.success) {
@@ -66,6 +72,12 @@ const noOfficialStarterGame = {
       probablePitcher: null
     }
   }
+};
+
+// Variant with no MLB weather — simulates a scheduled game before first pitch.
+const noWeatherGame = {
+  ...noOfficialStarterGame,
+  weather: null
 };
 
 const pitcherStatsPayload = {
@@ -593,5 +605,92 @@ describe("loadLiveSlate - projected starter flow into preparation", () => {
 
     expect(result.data.games[0]?.preparedGame.away_starter?.player_id).toBe("gerrit-cole");
     expect(result.data.games[0]?.playerIdentities["gerrit-cole"]).toBeUndefined();
+  });
+});
+
+describe("loadLiveSlate – Open-Meteo forecast fill", () => {
+  const forecastWeather = {
+    temperature_f: 58.0,
+    wind_speed_mph: 12.0,
+    wind_direction: "SE",
+    precipitation_chance: 0.1,
+    conditions: "Partly Cloudy",
+    dome_closed: null as boolean | null
+  };
+
+  it("fills canonicalGame.weather from forecast when MLB weather is null", async () => {
+    vi.mocked(fetchVenueWeather).mockResolvedValue(forecastWeather);
+    vi.mocked(fetchAndParseMlbStatsApiSchedule).mockResolvedValue({
+      success: true,
+      data: {
+        rawGames: [rawFixture],
+        parsedGames: [noWeatherGame] // weather: null — scheduled game before first pitch
+      }
+    } as never);
+    vi.mocked(fetchMlbStatsApiBoxscore).mockResolvedValue({
+      success: false,
+      error: "boxscore not available"
+    } as never);
+    vi.mocked(fetchMlbStatsApiLinescore).mockResolvedValue({
+      success: false,
+      error: "linescore unavailable"
+    } as never);
+    vi.mocked(fetchMlbStatsApiPitcherSeasonStats).mockResolvedValue({
+      success: false,
+      error: "no stats"
+    } as never);
+    vi.mocked(fetchWithTimeout).mockResolvedValue({
+      success: false,
+      error: "team stats unavailable"
+    } as never);
+
+    const result = await loadLiveSlate("2026-04-20");
+
+    expect(result.success).toBe(true);
+    if (!result.success) throw new Error(result.error);
+
+    const game = result.data.games[0];
+    expect(game).toBeDefined();
+    expect(game?.canonicalGame.weather).toEqual(forecastWeather);
+  });
+
+  it("keeps MLB weather when non-null and does not call forecast", async () => {
+    vi.mocked(fetchVenueWeather).mockResolvedValue(forecastWeather);
+    // rawFixture has weather in its payload — normalizer should populate it.
+    vi.mocked(fetchAndParseMlbStatsApiSchedule).mockResolvedValue({
+      success: true,
+      data: {
+        rawGames: [rawFixture],
+        parsedGames: [parsedFixture.data] // parsed with weather from fixture
+      }
+    } as never);
+    vi.mocked(fetchMlbStatsApiBoxscore).mockResolvedValue({
+      success: false,
+      error: "boxscore not available"
+    } as never);
+    vi.mocked(fetchMlbStatsApiLinescore).mockResolvedValue({
+      success: false,
+      error: "linescore unavailable"
+    } as never);
+    vi.mocked(fetchMlbStatsApiPitcherSeasonStats).mockResolvedValue({
+      success: false,
+      error: "no stats"
+    } as never);
+    vi.mocked(fetchWithTimeout).mockResolvedValue({
+      success: false,
+      error: "team stats unavailable"
+    } as never);
+
+    const result = await loadLiveSlate("2026-04-20");
+
+    expect(result.success).toBe(true);
+    if (!result.success) throw new Error(result.error);
+
+    const game = result.data.games[0];
+    expect(game).toBeDefined();
+    // rawFixture has {condition:"Overcast",temp:"52",wind:"12 mph, Out to RF"}
+    // so canonicalGame.weather must not be the Open-Meteo forecast object.
+    expect(game?.canonicalGame.weather).not.toBeNull();
+    expect(game?.canonicalGame.weather?.conditions).not.toBe("Partly Cloudy");
   });
 });
