@@ -114,7 +114,8 @@ describe("phase 9 services", () => {
         {
           parsedGame: parsed.data,
           canonicalGame: normalized.data,
-          preparedGame: prepared
+          preparedGame: prepared,
+          playerIdentities: {}
         }
       ],
       {

@@ -36,6 +36,15 @@ export interface ScheduleBoardProjection {
   readonly average_total_runs: number | null;
 }
 
+export interface ScheduleBoardWeather {
+  readonly temperature_f: number | null;
+  readonly wind_speed_mph: number | null;
+  readonly wind_direction: string | null;
+  readonly conditions: string | null;
+  readonly precipitation_chance: number | null;
+  readonly dome_closed: boolean | null;
+}
+
 export interface ScheduleBoardGame {
   readonly game_id: GameId;
   readonly scheduled_start: ISOTimestamp;
@@ -48,6 +57,7 @@ export interface ScheduleBoardGame {
   readonly completeness_score: number;
   readonly player_projection_status: ScheduleBoardPlayerProjectionStatus;
   readonly projection: ScheduleBoardProjection;
+  readonly weather: ScheduleBoardWeather | null;
 }
 
 export interface ScheduleBoardSummary {

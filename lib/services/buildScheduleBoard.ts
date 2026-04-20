@@ -1,11 +1,12 @@
 import type { MlbStatsApiScheduleGame } from "@lib/adapters/contracts";
-import type { CanonicalGame } from "@lib/contracts/canonical";
+import type { CanonicalGame, WeatherSummary } from "@lib/contracts/canonical";
 import type { PreparedGameInputs } from "@lib/contracts/prepared";
 import type {
   ScheduleBoardCounts,
   ScheduleBoardGame,
   ScheduleBoardPayload,
-  ScheduleBoardPitcher
+  ScheduleBoardPitcher,
+  ScheduleBoardWeather
 } from "@lib/contracts/schedule-board";
 import { asISOTimestamp } from "@lib/contracts/types";
 import { buildGameCard, type BuildGameCardOptions } from "./buildGameCard";
@@ -16,6 +17,7 @@ export interface ScheduleBoardSourceGame {
   readonly parsedGame: MlbStatsApiScheduleGame;
   readonly canonicalGame: CanonicalGame;
   readonly preparedGame: PreparedGameInputs;
+  readonly playerIdentities: Readonly<Record<string, { full_name: string | null }>>;
 }
 
 export interface BuildScheduleBoardOptions {
@@ -29,17 +31,40 @@ export interface BuildScheduleBoardOptions {
 
 const buildPitcher = (
   parsedPitcher: MlbStatsApiScheduleGame["teams"]["away"]["probablePitcher"],
-  canonicalPitcher: CanonicalGame["away"]["probable_pitcher"]
+  canonicalPitcher: CanonicalGame["away"]["probable_pitcher"],
+  playerIdentities: ScheduleBoardSourceGame["playerIdentities"]
 ): ScheduleBoardPitcher | null => {
   if (!parsedPitcher && !canonicalPitcher) {
     return null;
   }
 
+  // Prefer the name from the identity map (covers projected/inferred starters).
+  // Fall back to the raw MLB Stats API fullName (official source).
+  const player_id = canonicalPitcher?.player_id ?? null;
+  const full_name =
+    (player_id !== null ? playerIdentities[player_id]?.full_name : null) ??
+    parsedPitcher?.fullName ??
+    null;
+
   return {
-    player_id: canonicalPitcher?.player_id ?? null,
-    full_name: parsedPitcher?.fullName ?? null,
+    player_id,
+    full_name,
     handedness: canonicalPitcher?.handedness ?? "unknown",
     starting_status: canonicalPitcher?.starting_status ?? "unknown"
+  };
+};
+
+const buildScheduleBoardWeather = (
+  weather: WeatherSummary | null
+): ScheduleBoardWeather | null => {
+  if (weather === null) return null;
+  return {
+    temperature_f: weather.temperature_f,
+    wind_speed_mph: weather.wind_speed_mph,
+    wind_direction: weather.wind_direction,
+    conditions: weather.conditions,
+    precipitation_chance: weather.precipitation_chance,
+    dome_closed: weather.dome_closed
   };
 };
 
@@ -71,7 +96,8 @@ const buildScheduleBoardGame = (
       full_name: sourceGame.canonicalGame.away.team.full_name,
       probable_pitcher: buildPitcher(
         sourceGame.parsedGame.teams.away.probablePitcher,
-        sourceGame.canonicalGame.away.probable_pitcher
+        sourceGame.canonicalGame.away.probable_pitcher,
+        sourceGame.playerIdentities
       ),
       lineup_batters_available: sourceGame.preparedGame.away_team.lineup_batters_available
     },
@@ -81,7 +107,8 @@ const buildScheduleBoardGame = (
       full_name: sourceGame.canonicalGame.home.team.full_name,
       probable_pitcher: buildPitcher(
         sourceGame.parsedGame.teams.home.probablePitcher,
-        sourceGame.canonicalGame.home.probable_pitcher
+        sourceGame.canonicalGame.home.probable_pitcher,
+        sourceGame.playerIdentities
       ),
       lineup_batters_available: sourceGame.preparedGame.home_team.lineup_batters_available
     },
@@ -97,7 +124,8 @@ const buildScheduleBoardGame = (
       away_win_probability: gameCard.simulation?.away_win_probability ?? null,
       home_win_probability: gameCard.simulation?.home_win_probability ?? null,
       average_total_runs: gameCard.simulation?.average_total_runs ?? null
-    }
+    },
+    weather: buildScheduleBoardWeather(sourceGame.canonicalGame.weather ?? null)
   };
 };
 

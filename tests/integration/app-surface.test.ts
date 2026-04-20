@@ -31,7 +31,9 @@ import {
 } from "@/lib/slate-snapshot";
 import {
   formatGeneratedStamp,
+  formatInputCoverageLabel,
   formatScheduledStart,
+  formatWeatherLine,
   parseScheduleBoardPayload
 } from "@/lib/schedule-board";
 
@@ -101,6 +103,14 @@ const sampleScheduleBoardPayload = {
         away_win_probability: 0.57,
         home_win_probability: 0.43,
         average_total_runs: 8.4
+      },
+      weather: {
+        temperature_f: 68,
+        wind_speed_mph: 12,
+        wind_direction: "Out to CF",
+        conditions: "Partly Cloudy",
+        precipitation_chance: 0.1,
+        dome_closed: null
       }
     },
     {
@@ -137,7 +147,8 @@ const sampleScheduleBoardPayload = {
         away_win_probability: null,
         home_win_probability: null,
         average_total_runs: null
-      }
+      },
+      weather: null
     }
   ]
 };
@@ -799,6 +810,14 @@ describe("app surface shell", () => {
     expect(payload.games[0]?.projection.projected_total).toBe(8.5);
     expect(payload.games[0]?.player_projection_status).toBe("ready");
     expect(payload.games[1]?.projection.blocked.is_blocked).toBe(true);
+
+    // Weather field parses correctly for a game with weather
+    expect(payload.games[0]?.weather?.temperature_f).toBe(68);
+    expect(payload.games[0]?.weather?.conditions).toBe("Partly Cloudy");
+    expect(payload.games[0]?.weather?.wind_direction).toBe("Out to CF");
+
+    // Weather is null for a game without weather
+    expect(payload.games[1]?.weather).toBeNull();
   });
 
   it("parses the player board payload into the player surface model", () => {
@@ -922,5 +941,31 @@ describe("app surface shell", () => {
     expect(buildSampleSmokeSignalPayload().top_dfs_value_player?.ownership_source).toBe("placeholder");
     expect(formatGeneratedStamp("2026-04-04T12:00:00Z")).toBe("APR 04 | 12:00 UTC");
     expect(formatScheduledStart("2026-04-06T23:40:00Z")).toContain("CT");
+  });
+
+  it("lineup coverage label uses human-readable wording", () => {
+    const payload = parseScheduleBoardPayload(sampleScheduleBoardPayload);
+
+    // Both teams have 9 batters — should say "Full lineups set"
+    expect(formatInputCoverageLabel(payload.games[0]!)).toBe("Full lineups set");
+
+    // Away=6, home=5 — should be partial wording
+    const partial = formatInputCoverageLabel(payload.games[1]!);
+    expect(partial).toContain("partial");
+    expect(partial).toContain("away 6/9");
+    expect(partial).toContain("home 5/9");
+  });
+
+  it("weather format helper produces a display string when weather is present", () => {
+    const payload = parseScheduleBoardPayload(sampleScheduleBoardPayload);
+
+    const weatherLine = formatWeatherLine(payload.games[0]!);
+    expect(weatherLine).not.toBeNull();
+    expect(weatherLine).toContain("68°F");
+    expect(weatherLine).toContain("Partly Cloudy");
+    expect(weatherLine).toContain("12 mph");
+
+    // No weather → null
+    expect(formatWeatherLine(payload.games[1]!)).toBeNull();
   });
 });

@@ -4,7 +4,8 @@ import type {
   ScheduleBoardProjection,
   ScheduleBoardPlayerProjectionStatus,
   ScheduleBoardSummary,
-  ScheduleBoardTeam
+  ScheduleBoardTeam,
+  ScheduleBoardWeather
 } from "@lib/contracts/schedule-board";
 import {
   asGameId,
@@ -213,6 +214,43 @@ const parseScheduleBoardProjection = (value: unknown): ScheduleBoardProjection =
   };
 };
 
+const parseScheduleBoardWeather = (value: unknown): ScheduleBoardWeather | null => {
+  if (value === null || value === undefined) {
+    return null;
+  }
+
+  if (!isRecord(value)) {
+    throw new Error("Schedule board payload has invalid weather block.");
+  }
+
+  const readNullableNumber = (fieldName: string): number | null => {
+    const fieldValue = value[fieldName];
+    if (fieldValue === null || fieldValue === undefined) return null;
+    if (typeof fieldValue !== "number" || !Number.isFinite(fieldValue)) {
+      throw new Error(`Schedule board payload has invalid weather ${fieldName}.`);
+    }
+    return fieldValue;
+  };
+
+  const readNullableBoolean = (fieldName: string): boolean | null => {
+    const fieldValue = value[fieldName];
+    if (fieldValue === null || fieldValue === undefined) return null;
+    if (typeof fieldValue !== "boolean") {
+      throw new Error(`Schedule board payload has invalid weather ${fieldName}.`);
+    }
+    return fieldValue;
+  };
+
+  return {
+    temperature_f: readNullableNumber("temperature_f"),
+    wind_speed_mph: readNullableNumber("wind_speed_mph"),
+    wind_direction: readNullableString(value, "wind_direction"),
+    conditions: readNullableString(value, "conditions"),
+    precipitation_chance: readNullableNumber("precipitation_chance"),
+    dome_closed: readNullableBoolean("dome_closed")
+  };
+};
+
 const parseScheduleBoardGame = (value: unknown): ScheduleBoardGame => {
   if (!isRecord(value)) {
     throw new Error("Schedule board payload has invalid game.");
@@ -232,7 +270,8 @@ const parseScheduleBoardGame = (value: unknown): ScheduleBoardGame => {
       value,
       "player_projection_status"
     ),
-    projection: parseScheduleBoardProjection(value.projection)
+    projection: parseScheduleBoardProjection(value.projection),
+    weather: parseScheduleBoardWeather(value.weather)
   };
 };
 
@@ -410,11 +449,43 @@ export const formatProjectedTotalLabel = (game: ScheduleBoardGame): string | nul
     ? null
     : `Total ${game.projection.projected_total.toFixed(1)}`;
 
-export const formatInputCoverageLabel = (game: ScheduleBoardGame): string =>
-  `Lineups ${game.away_team.lineup_batters_available}-${game.home_team.lineup_batters_available}`;
+export const formatInputCoverageLabel = (game: ScheduleBoardGame): string => {
+  const away = game.away_team.lineup_batters_available;
+  const home = game.home_team.lineup_batters_available;
+  const awayFull = away >= 9;
+  const homeFull = home >= 9;
+
+  if (awayFull && homeFull) return "Full lineups set";
+  if (away === 0 && home === 0) return "Lineups pending";
+
+  const parts: string[] = [];
+  if (!awayFull) parts.push(`away ${away}/9`);
+  if (!homeFull) parts.push(`home ${home}/9`);
+  return `Lineups partial — ${parts.join(", ")}`;
+};
 
 export const formatBlockedReason = (value: string | null): string | null =>
   value === null ? null : value.replace(/_/g, " ");
+
+export const formatWeatherLine = (game: ScheduleBoardGame): string | null => {
+  const w = game.weather;
+  if (!w) return null;
+  if (w.dome_closed === true) return "Dome closed";
+
+  const parts: string[] = [];
+  if (w.temperature_f !== null) parts.push(`${Math.round(w.temperature_f)}°F`);
+  if (w.conditions !== null) parts.push(w.conditions);
+  if (w.wind_speed_mph !== null && w.wind_direction !== null) {
+    parts.push(`Wind ${Math.round(w.wind_speed_mph)} mph ${w.wind_direction}`);
+  } else if (w.wind_speed_mph !== null) {
+    parts.push(`Wind ${Math.round(w.wind_speed_mph)} mph`);
+  }
+  if (w.precipitation_chance !== null && w.precipitation_chance > 0) {
+    parts.push(`${Math.round(w.precipitation_chance * 100)}% precip`);
+  }
+
+  return parts.length > 0 ? parts.join(" · ") : null;
+};
 
 export const buildStarterLine = (game: ScheduleBoardGame): string => {
   const awayStarter = game.away_team.probable_pitcher?.full_name ?? "Starter TBD";

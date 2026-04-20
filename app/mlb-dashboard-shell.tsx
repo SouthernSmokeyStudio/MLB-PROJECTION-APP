@@ -25,6 +25,7 @@ import {
   formatScheduledStart,
   formatSourceLabel,
   formatStatusLabel,
+  formatWeatherLine,
   getErrorMessage,
   readResponseError,
 } from "@lib/schedule-board";
@@ -744,7 +745,10 @@ const ScheduleWorkspace = ({
                   <p className={`schedule-match-kicker ${game.projection.blocked.is_blocked ? "rejected" : "approved"}`}>
                     {formatStatusLabel(game.status)} | {formatScheduledStart(game.scheduled_start)}
                   </p>
-                  <span className="schedule-match-stamp">{game.venue_name ?? "Venue pending"}</span>
+                  <span className="schedule-match-stamp">
+                    {game.venue_name ?? "Venue pending"}
+                    {formatWeatherLine(game) ? ` · ${formatWeatherLine(game)}` : ""}
+                  </span>
                 </div>
                 <div className="schedule-match-body">
                   <div className="schedule-match-copy">
@@ -919,7 +923,10 @@ const GameProjectionsWorkspace = ({
                   <div className="projection-match-meta">
                     <span>{formatScheduledStart(game.scheduled_start)}</span>
                     <span>{formatStatusLabel(game.status)}</span>
-                    <span>{game.venue_name ?? "Venue pending"}</span>
+                    <span>
+                      {game.venue_name ?? "Venue pending"}
+                      {formatWeatherLine(game) ? ` · ${formatWeatherLine(game)}` : ""}
+                    </span>
                   </div>
                 </div>
 
