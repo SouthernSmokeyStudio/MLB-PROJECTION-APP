@@ -15,5 +15,10 @@
       "probablePitcher": { "id": 519242, "fullName": "Chris Sale" }
     }
   },
-  "venue": { "id": 3, "name": "Fenway Park" }
+  "venue": { "id": 3, "name": "Fenway Park" },
+  "weather": {
+    "condition": "Overcast",
+    "temp": "52",
+    "wind": "12 mph, Out to RF"
+  }
 }

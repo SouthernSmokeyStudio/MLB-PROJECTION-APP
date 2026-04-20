@@ -105,4 +105,33 @@ describe("raw -> normalized -> prepared pipeline", () => {
     expect(blocked.home_starter?.player_id).toBe("chris-sale");
     expect(blocked.home_starter?.season_era).toBeCloseTo(4.2);
   });
+
+  it("normalizer populates canonicalGame.weather from the parsed adapter weather field", () => {
+    // Regression for weather always being null in the normalizer.
+    // The raw fixture now includes a weather block (condition/temp/wind), matching
+    // what the MLB Stats API returns when hydrate=weather is used. The normalizer
+    // must convert that to a WeatherSummary — not discard it with weather: null.
+    const parsed = parseMlbStatsApiGamePayload(rawFixture);
+    expect(parsed.success).toBe(true);
+    if (!parsed.success) throw new Error(parsed.error);
+
+    // Adapter must surface the weather field.
+    expect(parsed.data.weather).not.toBeNull();
+    expect(parsed.data.weather?.condition).toBe("Overcast");
+    expect(parsed.data.weather?.temp).toBe("52");
+    expect(parsed.data.weather?.wind).toBe("12 mph, Out to RF");
+
+    const normalized = normalizeMlbStatsApiGame(parsed.data);
+    expect(normalized.success).toBe(true);
+    if (!normalized.success) throw new Error(normalized.error);
+
+    // Normalizer must emit a non-null WeatherSummary.
+    expect(normalized.data.weather).not.toBeNull();
+    expect(normalized.data.weather?.conditions).toBe("Overcast");
+    expect(normalized.data.weather?.temperature_f).toBe(52);
+    expect(normalized.data.weather?.wind_speed_mph).toBe(12);
+    expect(normalized.data.weather?.wind_direction).toBe("Out to RF");
+    expect(normalized.data.weather?.precipitation_chance).toBeNull();
+    expect(normalized.data.weather?.dome_closed).toBeNull();
+  });
 });

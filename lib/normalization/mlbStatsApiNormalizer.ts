@@ -17,6 +17,7 @@ import {
   type GameStatus,
   type Handedness,
   type Result,
+  type WeatherSummary,
   SPORT_ID
 } from "@lib/contracts/types";
 import {
@@ -24,6 +25,37 @@ import {
   type MlbStatsApiGameNormalizer,
   type NormalizationContext
 } from "./contracts";
+
+const parseWindField = (
+  wind: string | null
+): { wind_speed_mph: number | null; wind_direction: string | null } => {
+  if (!wind) return { wind_speed_mph: null, wind_direction: null };
+  const commaIdx = wind.indexOf(", ");
+  if (commaIdx === -1) return { wind_speed_mph: null, wind_direction: null };
+  const speedPart = wind.slice(0, commaIdx);
+  const direction = wind.slice(commaIdx + 2).trim();
+  const speedMatch = /^(\d+(?:\.\d+)?)\s*mph$/i.exec(speedPart);
+  return {
+    wind_speed_mph: speedMatch && speedMatch[1] != null ? parseFloat(speedMatch[1]) : null,
+    wind_direction: direction === "None" || direction === "" ? null : direction
+  };
+};
+
+const buildWeather = (
+  apiWeather: import("@lib/adapters/contracts").MlbStatsApiWeather | null
+): WeatherSummary | null => {
+  if (!apiWeather) return null;
+  const temperatureF = apiWeather.temp != null ? parseFloat(apiWeather.temp) : null;
+  const { wind_speed_mph, wind_direction } = parseWindField(apiWeather.wind);
+  return {
+    temperature_f: temperatureF != null && Number.isFinite(temperatureF) ? temperatureF : null,
+    wind_speed_mph,
+    wind_direction,
+    precipitation_chance: null,
+    conditions: apiWeather.condition,
+    dome_closed: apiWeather.condition === "Roof Closed" ? true : null
+  };
+};
 
 const TEAM_METADATA: Record<number, Omit<CanonicalTeam, "team_id" | "sport_id"> & { team_id_raw: string }> = {
   108: {
@@ -409,7 +441,7 @@ export const normalizeMlbStatsApiGame = (
     away: away.data,
     home: home.data,
     venue: buildVenue(raw.venue),
-    weather: null,
+    weather: buildWeather(raw.weather),
     sources: [
       {
         provider: "mlb-statsapi",

@@ -248,6 +248,15 @@ const parseVenue = (value: unknown): Result<MlbStatsApiVenue | null, string> => 
   return ok({ id, name });
 };
 
+const parseWeather = (value: unknown): import("./contracts").MlbStatsApiWeather | null => {
+  if (!isRecord(value)) return null;
+  return {
+    condition: readNullableString(value.condition),
+    temp: readNullableString(value.temp),
+    wind: readNullableString(value.wind)
+  };
+};
+
 export const parseMlbStatsApiGamePayload = (payload: unknown): Result<MlbStatsApiScheduleGame, string> => {
   if (!isRecord(payload)) {
     return err("Raw MLB Stats API payload must be an object");
@@ -290,7 +299,8 @@ export const parseMlbStatsApiGamePayload = (payload: unknown): Result<MlbStatsAp
     officialDate,
     status: parseStatus(payload.status),
     teams: teams.data,
-    venue: venue.data
+    venue: venue.data,
+    weather: parseWeather(payload.weather)
   });
 };
 
@@ -298,7 +308,8 @@ export const fetchMlbStatsApiSchedule = async (date: string): Promise<Result<unk
   const searchParams = new URLSearchParams({
     sportId: "1",
     scheduleType: "games",
-    date
+    date,
+    hydrate: "weather"
   });
 
   const { response, error: fetchError } = await fetchWithTimeout(`${MLB_STATS_API_SCHEDULE_ENDPOINT}?${searchParams.toString()}`, {

@@ -46,6 +46,12 @@ export interface MlbStatsApiLinescore {
   };
 }
 
+export interface MlbStatsApiWeather {
+  readonly condition: string | null;
+  readonly temp: string | null;
+  readonly wind: string | null;
+}
+
 export interface MlbStatsApiScheduleGame {
   readonly gamePk: number;
   readonly gameDate: string;
@@ -60,6 +66,7 @@ export interface MlbStatsApiScheduleGame {
   readonly status: MlbStatsApiGameStatus;
   readonly teams: MlbStatsApiScheduleTeams;
   readonly venue: MlbStatsApiVenue | null;
+  readonly weather: MlbStatsApiWeather | null;
 }
 
 export interface MlbStatsApiGameAdapter {
