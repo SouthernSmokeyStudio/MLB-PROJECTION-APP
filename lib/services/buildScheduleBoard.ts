@@ -1,5 +1,5 @@
 import type { MlbStatsApiScheduleGame } from "@lib/adapters/contracts";
-import type { CanonicalGame, WeatherSummary } from "@lib/contracts/canonical";
+import type { CanonicalGame } from "@lib/contracts/canonical";
 import type { PreparedGameInputs } from "@lib/contracts/prepared";
 import type {
   ScheduleBoardCounts,
@@ -55,7 +55,7 @@ const buildPitcher = (
 };
 
 const buildScheduleBoardWeather = (
-  weather: WeatherSummary | null
+  weather: CanonicalGame["weather"]
 ): ScheduleBoardWeather | null => {
   if (weather === null) return null;
   return {
