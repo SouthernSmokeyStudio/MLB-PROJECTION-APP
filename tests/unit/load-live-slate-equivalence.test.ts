@@ -40,6 +40,7 @@ vi.mock("@lib/adapters/mlbStatsApi", async () => {
 
 import { loadLiveSlate } from "../../lib/services/loadLiveSlate";
 import { buildPlayerBoard } from "../../lib/services/buildPlayerBoard";
+import { buildScheduleBoard } from "../../lib/services/buildScheduleBoard";
 import {
   fetchAndParseMlbStatsApiSchedule,
   fetchMlbStatsApiBoxscore,
@@ -494,6 +495,80 @@ describe("loadLiveSlate - projected starter flow into preparation", () => {
     const blockedReason = prepared?.blocked.blocked_reason ?? "";
     expect(blockedReason).not.toContain("Missing away_starter preparation data");
     expect(blockedReason).not.toContain("Missing home_starter preparation data");
+  });
+
+  it("canonicalGame carries merged starters when projected starters win and no boxscore is available", async () => {
+    // Regression for the liveCanonical fix in loadLiveSlate.
+    // Before the fix, liveGames.push stored canonicalGame: game.normalizedGame (pre-merge),
+    // which had probable_pitcher = null because no official MLB pitcher was listed.
+    // buildScheduleBoard saw the pre-merge canonical and emitted probable_pitcher: null
+    // even though preparedGame.has_both_starters was true (it used mergedCanonical).
+    // After the fix, liveGames.push stores canonicalGame: liveCanonical (= mergedCanonical
+    // when no boxscore, = reconcileCanonical when boxscore), so the fields are consistent.
+    const mockOneGameNoBoxscore = (): void => {
+      vi.mocked(fetchAndParseMlbStatsApiSchedule).mockResolvedValue({
+        success: true,
+        data: {
+          rawGames: [rawFixture],
+          parsedGames: [noOfficialStarterGame]
+        }
+      } as never);
+      vi.mocked(fetchMlbStatsApiBoxscore).mockResolvedValue({
+        success: false,
+        error: "boxscore not available"
+      } as never);
+      vi.mocked(fetchMlbStatsApiLinescore).mockResolvedValue({
+        success: false,
+        error: "linescore unavailable"
+      } as never);
+      vi.mocked(fetchMlbStatsApiPitcherSeasonStats).mockResolvedValue({
+        success: true,
+        data: pitcherStatsPayload
+      } as never);
+      mockTeamStatFetches();
+    };
+
+    mockOneGameNoBoxscore();
+
+    const result = await loadLiveSlate("2026-03-27", {
+      projectedGames: new Map([[projectedGame.game_id, projectedGame]])
+    });
+
+    expect(result.success).toBe(true);
+    if (!result.success) throw new Error(result.error);
+
+    const sourceGame = result.data.games[0];
+    expect(sourceGame).toBeDefined();
+
+    // canonicalGame must carry the merged starter — not the pre-merge null.
+    expect(sourceGame?.canonicalGame.away.probable_pitcher).not.toBeNull();
+    expect(sourceGame?.canonicalGame.home.probable_pitcher).not.toBeNull();
+    expect(sourceGame?.canonicalGame.away.probable_pitcher?.player_id).toBe("gerrit-cole");
+    expect(sourceGame?.canonicalGame.home.probable_pitcher?.player_id).toBe("chris-sale");
+
+    // preparedGame and canonicalGame must agree — no has_both_starters / probable_pitcher contradiction.
+    expect(sourceGame?.preparedGame.has_both_starters).toBe(true);
+
+    // buildScheduleBoard must surface the merged starters — the /api/schedule-board endpoint
+    // depends on this path. Before the fix this emitted probable_pitcher: null.
+    const board = buildScheduleBoard(result.data.games, {
+      source: "live",
+      date: "2026-03-27",
+      counts: {
+        fetched_raw: 1,
+        parsed: 1,
+        normalized: 1,
+        prepared: 1,
+        boxscore_enriched: 0
+      }
+    });
+
+    const boardGame = board.games[0];
+    expect(boardGame).toBeDefined();
+    expect(boardGame?.away_team.probable_pitcher).not.toBeNull();
+    expect(boardGame?.home_team.probable_pitcher).not.toBeNull();
+    expect(boardGame?.away_team.probable_pitcher?.player_id).toBe("gerrit-cole");
+    expect(boardGame?.home_team.probable_pitcher?.player_id).toBe("chris-sale");
   });
 
   it("does not invent projected pitcher full names from slug-only identity", async () => {

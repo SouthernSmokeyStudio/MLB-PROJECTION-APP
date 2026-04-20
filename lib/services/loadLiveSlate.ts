@@ -821,6 +821,11 @@ export const loadLiveSlate = async (
     let preparedGame =
       materializedLookup.get(game.normalizedGame.game_id) ??
       prepareGameInputs(mergedCanonical);
+    // Track which canonical is authoritative for this game. Starts as
+    // mergedCanonical (merge-law result). Updated to reconcileCanonical when
+    // boxscore enrichment runs — that version back-fills numeric starter IDs
+    // and patches actual starters from live data.
+    let liveCanonical: CanonicalGame = mergedCanonical;
 
     if (fetchedBoxscore.success) {
       const extracted = extractPreparedGameDataFromBoxscore(
@@ -1019,13 +1024,14 @@ export const loadLiveSlate = async (
           }
         }
         preparedGame = prepareGameInputs(reconcileCanonical, enrichedData);
+        liveCanonical = reconcileCanonical;
         boxscoreEnriched++;
       }
     }
 
     liveGames.push({
       parsedGame: game.parsedGame,
-      canonicalGame: game.normalizedGame,
+      canonicalGame: liveCanonical,
       preparedGame,
       playerIdentities,
       liveScoreState
