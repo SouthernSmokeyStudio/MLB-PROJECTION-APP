@@ -30,12 +30,16 @@ export const loadPublishedSlateSnapshot = async (
   }
 };
 
+export type StoreSnapshotResult =
+  | { ok: true }
+  | { ok: false; error: string };
+
 export const storePublishedSlateSnapshot = async (
   row: PublishedSlateSnapshotRow
-): Promise<void> => {
+): Promise<StoreSnapshotResult> => {
   try {
     const client = getSupabaseWriteClient();
-    await client.from(TABLE).upsert(
+    const { error } = await client.from(TABLE).upsert(
       {
         date: row.date,
         run_id: row.run_id,
@@ -46,9 +50,12 @@ export const storePublishedSlateSnapshot = async (
       },
       { onConflict: "date" }
     );
-  } catch {
-    // Non-fatal: cron continues even if snapshot store fails.
-    // A missing row causes the GET route to return degraded state rather than
-    // serving stale data — fail-closed is the correct behavior here.
+    if (error) {
+      return { ok: false, error: error.message };
+    }
+    return { ok: true };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return { ok: false, error: message };
   }
 };

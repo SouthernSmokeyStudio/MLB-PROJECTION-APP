@@ -280,7 +280,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
   // ── Step 6: Publish to published_slate_snapshot ─────────────────────────────
   const hasBlockedSections = slatePayload.publication.blocked_sections.length > 0;
-  await storePublishedSlateSnapshot({
+  const snapshotResult = await storePublishedSlateSnapshot({
     date,
     run_id: runId,
     generated_at: generatedAt,
@@ -288,6 +288,12 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     degradation: slatePayload.degradation,
     payload: slatePayload
   });
+
+  if (!snapshotResult.ok) {
+    results.snapshot = { ok: false, error: snapshotResult.error };
+    return NextResponse.json({ ok: false, date, results }, { status: 500 });
+  }
+
   results.snapshot = {
     ok: true,
     publication_state: hasBlockedSections ? "degraded" : "valid",
