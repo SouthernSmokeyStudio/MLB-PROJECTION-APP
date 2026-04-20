@@ -409,25 +409,24 @@ describe("no second publication path — route boundary", () => {
     expect(slate).not.toHaveProperty("liveScoreState");
   });
 
-  it("route source file reads exactly one JSON response builder: buildSlateSnapshot", () => {
-    // Read the actual route source and verify structural invariant:
-    // exactly one call to buildSlateSnapshot, zero direct snapshot construction.
+  it("route source file is display-only: reads published_slate_snapshot, no live compute", () => {
+    // Structural invariant for the Supabase-first architecture:
+    // slate-snapshot/route.ts must read from published_slate_snapshot and never
+    // perform live computation (no buildSlateSnapshot, no loadLiveSlate calls).
     const routeSource = readFileSync(
       join(process.cwd(), "app", "api", "slate-snapshot", "route.ts"),
       "utf-8"
     );
 
-    // buildSlateSnapshot is called exactly once
-    const snapshotCalls = routeSource.match(/buildSlateSnapshot\(/g) ?? [];
-    expect(snapshotCalls).toHaveLength(1);
+    // Must read from the published snapshot store
+    expect(routeSource).toContain("loadPublishedSlateSnapshot");
 
-    // NextResponse.json is called exactly once
-    const responseCalls = routeSource.match(/NextResponse\.json\(/g) ?? [];
-    expect(responseCalls).toHaveLength(1);
+    // Must NOT call live compute functions
+    expect(routeSource).not.toContain("buildSlateSnapshot(");
+    expect(routeSource).not.toContain("loadLiveSlate(");
+    expect(routeSource).not.toContain("loadDraftKingsClassicSlate(");
 
     // No direct SlateSnapshotPayload construction
     expect(routeSource).not.toContain("mode: \"slate-snapshot-v1\"");
-    expect(routeSource).not.toContain("publication:");
-    expect(routeSource).not.toContain("degradation:");
   });
 });
