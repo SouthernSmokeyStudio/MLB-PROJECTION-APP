@@ -34,7 +34,7 @@ export const runBackfillDraftKingsClassicSlateCli = async (
   }
 
   io.log(`[dk-classic-backfill] SUCCESS date=${date}`);
-  io.log(`[dk-classic-backfill] artifact: ${result.data.artifactPath}`);
+  io.log(`[dk-classic-backfill] artifact: ${result.data.artifactPath ?? "(skipped — read-only filesystem)"}`);
   io.log(`[dk-classic-backfill] slates: ${result.data.slates.length}`);
   return 0;
 };

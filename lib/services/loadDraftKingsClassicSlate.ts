@@ -351,7 +351,10 @@ export const backfillDraftKingsClassicSlate = async ({
 }: Pick<LoadDraftKingsClassicSlateOptions, "date" | "artifactDir">): Promise<
   Result<
     {
-      readonly artifactPath: string;
+      /** Filesystem artifact path if written; null on environments where the
+       *  filesystem is read-only (e.g. Vercel Lambda). Supabase is the
+       *  authoritative persistence path — this is a local-dev convenience. */
+      readonly artifactPath: string | null;
       readonly slates: readonly LoadedDraftKingsClassicSlateItem[];
     },
     string
@@ -407,21 +410,23 @@ export const backfillDraftKingsClassicSlate = async ({
     return err("All DraftKings Classic salary slate fetches failed");
   }
 
-  // Write to Supabase (survives Lambda restarts) alongside filesystem (local dev).
+  // Write to Supabase (survives Lambda restarts) — this is the authoritative
+  // production persistence path.
   await storeSupabaseDkClassicSnapshot(date, slates, slates.length);
 
+  // Write to local filesystem for local-dev replay convenience.
+  // This write is non-fatal: Vercel's /var/task is read-only and will produce
+  // ENOENT on mkdir. Production runs on Supabase only.
   const persistResult = await persistDraftKingsClassicSlate({
     date,
     artifactDir,
     slates: persistEntries
   });
 
-  if (!persistResult.success) {
-    return err(persistResult.error);
-  }
+  const artifactPath = persistResult.success ? persistResult.data : null;
 
   return ok({
-    artifactPath: persistResult.data,
+    artifactPath,
     slates
   });
 };

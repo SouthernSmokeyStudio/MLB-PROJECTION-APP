@@ -189,4 +189,39 @@ describe("backfillDraftKingsClassicSlate", () => {
     expect(fetchUpcomingDraftKingsClassicDraftGroups).toHaveBeenCalledTimes(2);
     expect(fetchDraftKingsClassicSalarySlate).toHaveBeenCalledTimes(1);
   });
+
+  it("returns ok with null artifactPath when filesystem write fails (Vercel read-only /var/task)", async () => {
+    // Simulate a production environment where the filesystem write cannot succeed.
+    // We pre-create a DIRECTORY at the artifact file path so writeFile fails with EISDIR.
+    // backfillDraftKingsClassicSlate must still return ok because Supabase is the
+    // authoritative persistence path — the filesystem write is local-dev only.
+    const { mkdir: fsMkdir } = await import("node:fs/promises");
+    await fsMkdir(join(artifactDir, "2026-04-10.json"), { recursive: true });
+
+    const draftGroup = makeDraftGroup();
+    vi.mocked(fetchUpcomingDraftKingsClassicDraftGroups).mockResolvedValue({
+      success: true,
+      data: [draftGroup]
+    });
+    vi.mocked(fetchDraftKingsClassicSalarySlate).mockResolvedValue({
+      success: true,
+      data: makeSalarySlate("145340")
+    });
+
+    const result = await backfillDraftKingsClassicSlate({
+      date: "2026-04-10",
+      artifactDir
+    });
+
+    // Must succeed — the Supabase write path is the authoritative production path.
+    expect(result.success).toBe(true);
+    if (!result.success) throw new Error(result.error);
+
+    // artifactPath is null because the filesystem write was not possible.
+    expect(result.data.artifactPath).toBeNull();
+
+    // Slates are still returned — the Supabase write happened (non-fatal swallowed).
+    expect(result.data.slates).toHaveLength(1);
+    expect(result.data.slates[0]?.draft_group_id).toBe("145340");
+  });
 });

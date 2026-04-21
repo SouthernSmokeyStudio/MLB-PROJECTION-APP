@@ -327,9 +327,20 @@ export const persistPlayerProjections = async (
     const rpcResult = await client.rpc("persist_projection_run", payload);
 
     if (rpcResult.error) {
+      // Surface the full Supabase error including code and hint so callers
+      // can distinguish missing-function (PGRST202), permission-denied (42501),
+      // JWT-expired / wrong-key (401 / PGRST301), and constraint violations.
+      const e = rpcResult.error;
+      const detail = [
+        e.message,
+        e.code ? `code=${e.code}` : null,
+        e.hint ? `hint=${e.hint}` : null
+      ]
+        .filter(Boolean)
+        .join(" | ");
       return {
         ok: false,
-        error: new Error(`persist_projection_run RPC failed: ${rpcResult.error.message}`)
+        error: new Error(`persist_projection_run RPC failed: ${detail}`)
       };
     }
 
