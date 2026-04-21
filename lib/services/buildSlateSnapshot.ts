@@ -28,6 +28,14 @@ export interface BuildSlateSnapshotOptions {
   readonly date: string;
   readonly counts: LiveSlateCounts;
   readonly generated_at?: string;
+  /**
+   * Pre-assembled projections keyed by game_id. When provided, buildSlateSnapshot
+   * uses these directly instead of calling assembleGameProjection a second time.
+   * Callers that already assembled projections for other steps (e.g. morning-capture
+   * assembles for player persistence) should pass the same map here to guarantee
+   * parent truth is consistent across all boards and the published snapshot.
+   */
+  readonly preassembled?: ReadonlyMap<string, AssembledGameProjection>;
   readonly simulation?: {
     readonly seed?: number;
     readonly iterations?: number;
@@ -201,9 +209,15 @@ export const buildSlateSnapshot = (
   // read from this shared map — no board recomputes the game projection
   // independently. This is the single authoritative parent truth for this
   // snapshot build. Each entry is keyed by game_id.
-  const preassembledProjections: ReadonlyMap<string, AssembledGameProjection> = new Map(
-    sourceGames.map((g) => [g.preparedGame.game_id, assembleGameProjection(g.preparedGame)])
-  );
+  //
+  // When the caller already assembled projections (e.g. morning-capture builds
+  // them for player persistence), those are passed in via options.preassembled
+  // to guarantee consistent parent truth across all steps of the pipeline.
+  const preassembledProjections: ReadonlyMap<string, AssembledGameProjection> =
+    options.preassembled ??
+    new Map(
+      sourceGames.map((g) => [g.preparedGame.game_id, assembleGameProjection(g.preparedGame)])
+    );
 
   // Load + index crosswalk from committed file. Fail closed: null on any load/validate failure.
   // The crosswalk is only activated when at least one entry has a linked dk_player_id,

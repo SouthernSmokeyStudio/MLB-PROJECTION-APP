@@ -11,6 +11,7 @@ import { normalizeMlbStatsApiGame } from "../../lib/normalization/mlbStatsApiNor
 import { parseSlateSnapshotPayload, getSlateSnapshotBlockedSections } from "../../lib/slate-snapshot";
 import { buildSlateSnapshot } from "../../lib/services/buildSlateSnapshot";
 import { indexCrosswalk } from "../../lib/crosswalk/resolvePlayerIdentity";
+import { assembleGameProjection } from "../../lib/projections/assembleGameProjection";
 
 const prepared = preparedFixture as unknown as PreparedGameInputs;
 
@@ -490,5 +491,74 @@ describe("slate snapshot scaffolding", () => {
     );
     expect(heldPitcher?.draftkings_classic.blocked.is_blocked).toBe(true);
     expect(heldPitcher?.draftkings_classic.blocked.blocked_reason).toContain("Crosswalk");
+  });
+});
+
+describe("buildSlateSnapshot preassembled threading", () => {
+  it("uses preassembled projections instead of recomputing when provided", () => {
+    // Build the real assembled projection once.
+    const realAssembled = assembleGameProjection(sourceGame.preparedGame);
+
+    // Override projected_total with a sentinel value to prove the preassembled
+    // map is actually used — if buildSlateSnapshot recomputes from scratch, the
+    // sentinel would not appear and the assertion would fail.
+    const SENTINEL_TOTAL = 33.33;
+    const modifiedAssembled = {
+      ...realAssembled,
+      game_projection: {
+        ...realAssembled.game_projection,
+        projected_total: SENTINEL_TOTAL,
+        away: {
+          ...realAssembled.game_projection.away,
+          projected_runs: SENTINEL_TOTAL / 2
+        },
+        home: {
+          ...realAssembled.game_projection.home,
+          projected_runs: SENTINEL_TOTAL / 2
+        }
+      }
+    };
+
+    const preassembled = new Map([
+      [sourceGame.canonicalGame.game_id, modifiedAssembled as typeof realAssembled]
+    ]);
+
+    const snapshot = buildSlateSnapshot([sourceGame], {
+      source: "mlb-statsapi-live",
+      date: "2026-03-27",
+      generated_at: "2026-03-27T15:30:00Z",
+      counts,
+      preassembled,
+      simulation: { seed: 7, iterations: 100 }
+    });
+
+    // The sentinel value must surface in the smoke signal's top projected total,
+    // proving the preassembled projection was threaded through the pipeline
+    // rather than recomputed from prepared inputs.
+    expect(snapshot.smoke_signal.payload?.top_projected_total_game?.projected_total).toBe(SENTINEL_TOTAL);
+    // Schedule board must also reflect the same parent truth.
+    const scheduleGame = snapshot.schedule.payload?.games[0];
+    expect(scheduleGame?.projection?.projected_total).toBe(SENTINEL_TOTAL);
+  });
+
+  it("falls back to fresh computation when preassembled map has no entry for a game", () => {
+    const realAssembled = assembleGameProjection(sourceGame.preparedGame);
+    const realTotal = realAssembled.game_projection.projected_total;
+
+    // Provide a preassembled map that does NOT contain this game_id.
+    const emptyPreassembled = new Map<string, typeof realAssembled>();
+
+    const snapshot = buildSlateSnapshot([sourceGame], {
+      source: "mlb-statsapi-live",
+      date: "2026-03-27",
+      generated_at: "2026-03-27T15:30:00Z",
+      counts,
+      preassembled: emptyPreassembled,
+      simulation: { seed: 7, iterations: 100 }
+    });
+
+    // Should fall back to assembleGameProjection and produce the same total
+    // as the fresh computation path.
+    expect(snapshot.smoke_signal.payload?.top_projected_total_game?.projected_total).toBe(realTotal);
   });
 });

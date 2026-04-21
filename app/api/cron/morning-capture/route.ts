@@ -80,11 +80,17 @@ const buildGameProjectionRows = (
   date: string,
   runId: string | null,
   sourceGames: readonly LiveSlateSourceGame[],
-  generatedAt: string
+  generatedAt: string,
+  preassembled: ReadonlyMap<string, ReturnType<typeof assembleGameProjection>>
 ): readonly GameProjectionUpsertRow[] =>
   sourceGames.map((sg) => {
     const p = sg.preparedGame;
-    const assembled = assembleGameProjection(p);
+    // Use the pre-assembled projection from the shared parent-truth map.
+    // assembleGameProjection must not be called again here — all steps in this
+    // pipeline must read from the same assembled objects to guarantee consistency
+    // between the published snapshot, the game_projections table, and the
+    // persisted player projection rows.
+    const assembled = preassembled.get(sg.canonicalGame.game_id) ?? assembleGameProjection(p);
     return {
       projection_date: date,
       game_id: sg.canonicalGame.game_id,
@@ -154,11 +160,22 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const sourceGames = liveSlateResult.data.games;
   const counts = liveSlateResult.data.counts;
 
+  // ── Pre-assemble game projections (ONE pass, shared across all steps) ───────
+  // Steps 4, 5, and 7 all consume assembled game projections. Building them
+  // once here ensures the player persistence rows, the published snapshot, and
+  // the game_projections table all reflect the same parent truth. Calling
+  // assembleGameProjection separately in each step would risk divergence if the
+  // function ever becomes non-deterministic or is changed independently.
+  const allAssembledProjections = new Map(
+    sourceGames.map((g) => [g.canonicalGame.game_id, assembleGameProjection(g.preparedGame)])
+  );
+
   // ── Step 4: Persist player projections ─────────────────────────────────────
-  const projectableGames = sourceGames.map((g) => ({
-    preparedGame: g.preparedGame,
-    assembledProjection: assembleGameProjection(g.preparedGame)
-  }));
+  const projectableGames = sourceGames
+    .map((g) => ({
+      preparedGame: g.preparedGame,
+      assembledProjection: allAssembledProjections.get(g.canonicalGame.game_id)!
+    }));
 
   const projectable = projectableGames.filter(
     (g) =>
@@ -220,6 +237,10 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     date,
     generated_at: generatedAt,
     counts,
+    // Thread the pre-assembled parent truth into the snapshot builder so all
+    // boards in the published snapshot use exactly the same projections as the
+    // player persistence rows (step 4) and game_projections rows (step 7).
+    preassembled: allAssembledProjections,
     simulation: DEFAULT_SIMULATION,
     schedule: {
       source: liveSlateResult.data.source,
@@ -302,7 +323,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   };
 
   // ── Step 7: Write game_projections parent truth rows ────────────────────────
-  const gameProjectionRows = buildGameProjectionRows(date, runId, sourceGames, generatedAt);
+  const gameProjectionRows = buildGameProjectionRows(date, runId, sourceGames, generatedAt, allAssembledProjections);
   const upsertResult: UpsertGameProjectionsResult = await upsertGameProjections(gameProjectionRows);
   if (upsertResult.ok) {
     results.game_projections = { ok: true, game_count: gameProjectionRows.length };
