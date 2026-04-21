@@ -21,6 +21,7 @@ import {
   upsertGameProjections,
   type GameProjectionUpsertRow
 } from "@lib/supabase/gameProjectionsTable";
+import type { UpsertGameProjectionsResult } from "@lib/supabase/gameProjectionsTable";
 import type { LiveSlateSourceGame } from "@lib/services/loadLiveSlate";
 
 // Runs at 13:00 UTC (8:00 AM CT) daily — before any MLB first pitches and
@@ -302,12 +303,22 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
   // ── Step 7: Write game_projections parent truth rows ────────────────────────
   const gameProjectionRows = buildGameProjectionRows(date, runId, sourceGames, generatedAt);
-  await upsertGameProjections(gameProjectionRows);
-  results.game_projections = { ok: true, game_count: gameProjectionRows.length };
+  const upsertResult: UpsertGameProjectionsResult = await upsertGameProjections(gameProjectionRows);
+  if (upsertResult.ok) {
+    results.game_projections = { ok: true, game_count: gameProjectionRows.length };
+  } else {
+    // Non-fatal: game_projections is secondary analytics storage.
+    // published_slate_snapshot (step 6) is the authoritative app surface.
+    results.game_projections = { ok: false, error: upsertResult.error };
+  }
 
-  const allOk = Object.values(results).every(
-    (r) => typeof r === "object" && r !== null && (r as Record<string, unknown>).ok === true
-  );
+  // game_projections is secondary analytics storage, not the app-facing publish surface.
+  // Its failure is surfaced in results but does not count against the overall ok status.
+  const criticalKeys = ["dk_classic", "projections", "snapshot"] as const;
+  const allOk = criticalKeys.every((key) => {
+    const r = results[key];
+    return typeof r === "object" && r !== null && (r as Record<string, unknown>).ok === true;
+  });
 
   return NextResponse.json({ ok: allOk, date, results }, { status: allOk ? 200 : 500 });
 }

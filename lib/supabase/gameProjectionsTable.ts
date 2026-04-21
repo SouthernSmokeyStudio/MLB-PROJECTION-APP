@@ -22,19 +22,25 @@ export interface GameProjectionUpsertRow {
   readonly source_generated_at: string | null;
 }
 
+export type UpsertGameProjectionsResult =
+  | { readonly ok: true }
+  | { readonly ok: false; readonly error: string };
+
 export const upsertGameProjections = async (
   rows: readonly GameProjectionUpsertRow[]
-): Promise<void> => {
-  if (rows.length === 0) return;
+): Promise<UpsertGameProjectionsResult> => {
+  if (rows.length === 0) return { ok: true };
   try {
     const client = getSupabaseWriteClient();
-    await client
+    const { error } = await client
       .from(TABLE)
       .upsert(rows as unknown as Record<string, unknown>[], {
         onConflict: "projection_date,game_id"
       });
-  } catch {
-    // Non-fatal: missing game_projections rows don't block the publish pipeline.
-    // The published_slate_snapshot is the primary app-facing surface.
+    if (error) return { ok: false, error: error.message };
+    return { ok: true };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return { ok: false, error: message };
   }
 };

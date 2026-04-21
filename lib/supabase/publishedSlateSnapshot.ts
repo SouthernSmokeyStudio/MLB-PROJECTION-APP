@@ -1,4 +1,5 @@
 import type { SlateSnapshotPayload } from "@lib/contracts/slate-snapshot";
+import { getSupabaseReadClient } from "./client";
 import { getSupabaseWriteClient } from "./writeClient";
 
 const TABLE = "published_slate_snapshot";
@@ -16,7 +17,9 @@ export const loadPublishedSlateSnapshot = async (
   date: string
 ): Promise<PublishedSlateSnapshotRow | null> => {
   try {
-    const client = getSupabaseWriteClient();
+    // Reads use the anon key — the published_slate_snapshot table has an
+    // explicit anon SELECT policy. Service role key is not required for reads.
+    const client = getSupabaseReadClient();
     const { data, error } = await client
       .from(TABLE)
       .select("date, run_id, generated_at, publication_state, degradation, payload")

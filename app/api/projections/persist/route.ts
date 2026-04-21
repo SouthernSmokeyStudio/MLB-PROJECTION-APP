@@ -44,6 +44,11 @@ const loadStarterIntelligenceGames = async (
 };
 
 export async function POST(request: NextRequest): Promise<Response> {
+  const authHeader = request.headers.get("authorization");
+  if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
   let date: string;
   try {
     const body = await request.json().catch(() => ({}));
