@@ -254,7 +254,7 @@ describe("buildSmokeSignal", () => {
     expect(payload.top_dfs_value_player?.projected_ownership).toBe(0.334);
     expect(payload.top_betting_edge_side?.edge).toBe(0.05);
     expect(payload.live_pulse?.live_games).toBe(1);
-    expect(payload.note).toBeNull();
+    expect(payload.note).toContain("current-snapshot synthesis");
   });
 
   it("marks missing canonical highlight slots explicitly in the note", () => {

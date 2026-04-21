@@ -12,6 +12,12 @@ const BASE_LEAGUE_RUNS_PER_GAME = 4.6;
 const BASE_LEAGUE_WOBA = 0.32;
 export const BASE_LEAGUE_ERA = 4.2;
 const BASE_LEAGUE_BULLPEN_ERA = 4.1;
+// Home teams historically score ~2.5% more runs than visitors at the same venue.
+// This captures familiarity, crowd energy, and batting last. Small but real and
+// consistent across decades of MLB data. Applied as a symmetric ±factor so the
+// projected total is not inflated — the home team gains what the away team loses.
+const HOME_FIELD_RUN_FACTOR = 1.025;
+const AWAY_FIELD_RUN_FACTOR = 1 / HOME_FIELD_RUN_FACTOR; // ≈ 0.976
 
 const clamp = (value: number, min: number, max: number): number => Math.min(Math.max(value, min), max);
 const round2 = (value: number): number => Math.round(value * 100) / 100;
@@ -122,7 +128,8 @@ export const projectTeamRuns = (inputs: PreparedGameInputs): TeamRunsProjectionR
     computePitchingFactor(inputs.home_starter.season_era, inputs.home_starter.recent_era) *
     computeBullpenFactor(inputs.home_team.bullpen_era) *
     parkFactor *
-    weatherFactor;
+    weatherFactor *
+    AWAY_FIELD_RUN_FACTOR;
 
   const homeRuns =
     BASE_LEAGUE_RUNS_PER_GAME *
@@ -134,7 +141,8 @@ export const projectTeamRuns = (inputs: PreparedGameInputs): TeamRunsProjectionR
     computePitchingFactor(inputs.away_starter.season_era, inputs.away_starter.recent_era) *
     computeBullpenFactor(inputs.away_team.bullpen_era) *
     parkFactor *
-    weatherFactor;
+    weatherFactor *
+    HOME_FIELD_RUN_FACTOR;
 
   const projectedAwayRuns = round2(clamp(awayRuns, 0, 15));
   const projectedHomeRuns = round2(clamp(homeRuns, 0, 15));

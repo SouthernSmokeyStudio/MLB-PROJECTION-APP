@@ -21,6 +21,7 @@ import type { LiveSlateCounts, LiveSlateSourceGame } from "./loadLiveSlate";
 import { loadCrosswalk } from "@lib/crosswalk/loadCrosswalk";
 import { indexCrosswalk } from "@lib/crosswalk/resolvePlayerIdentity";
 import type { LoadedDraftKingsClassicSlateItem } from "./loadDraftKingsClassicSlate";
+import { assembleGameProjection, type AssembledGameProjection } from "@lib/projections/assembleGameProjection";
 
 export interface BuildSlateSnapshotOptions {
   readonly source: string;
@@ -196,6 +197,14 @@ export const buildSlateSnapshot = (
   const generatedAt = asISOTimestamp(options.generated_at ?? new Date().toISOString());
   const simulationOptions = options.simulation;
 
+  // Pre-compute one AssembledGameProjection per game. All downstream boards
+  // read from this shared map — no board recomputes the game projection
+  // independently. This is the single authoritative parent truth for this
+  // snapshot build. Each entry is keyed by game_id.
+  const preassembledProjections: ReadonlyMap<string, AssembledGameProjection> = new Map(
+    sourceGames.map((g) => [g.preparedGame.game_id, assembleGameProjection(g.preparedGame)])
+  );
+
   // Load + index crosswalk from committed file. Fail closed: null on any load/validate failure.
   // The crosswalk is only activated when at least one entry has a linked dk_player_id,
   // otherwise the salary join would hold every resolved player with no benefit.
@@ -211,6 +220,7 @@ export const buildSlateSnapshot = (
     generated_at: generatedAt,
     counts: options.counts,
     note: options.schedule?.note ?? null,
+    preassembled: preassembledProjections,
     ...(simulationOptions ? { simulation: simulationOptions } : {})
   });
   const playerPayload = buildPlayerBoard(sourceGames, {
@@ -219,6 +229,7 @@ export const buildSlateSnapshot = (
     generated_at: generatedAt,
     counts: options.counts,
     note: options.player_projections?.note ?? null,
+    preassembled: preassembledProjections,
     ...(simulationOptions ? { simulation: simulationOptions } : {})
   });
 
@@ -256,6 +267,7 @@ export const buildSlateSnapshot = (
           date: options.date,
           generated_at: generatedAt,
           counts: options.counts,
+          preassembled: preassembledProjections,
           ...(simulationOptions ? { simulation: simulationOptions } : {}),
           ...(effectiveCrosswalk ? { crosswalk: effectiveCrosswalk } : {})
         });
@@ -270,6 +282,7 @@ export const buildSlateSnapshot = (
           generated_at: generatedAt,
           counts: options.counts,
           note: options.dfs_edge_degraded!.note ?? null,
+          preassembled: preassembledProjections,
           // No draftkings_classic → salary-degraded mode
           ...(simulationOptions ? { simulation: simulationOptions } : {}),
           ...(loadedCrosswalk ? { crosswalk: loadedCrosswalk } : {})
@@ -293,6 +306,7 @@ export const buildSlateSnapshot = (
           date: options.date,
           generated_at: generatedAt,
           counts: options.counts,
+          preassembled: preassembledProjections,
           ...(simulationOptions ? { simulation: simulationOptions } : {})
         });
 
@@ -307,6 +321,7 @@ export const buildSlateSnapshot = (
           counts: options.counts,
           note: options.betting_edge_degraded!.note ?? null,
           draftkings_sportsbook_moneyline: { site: "US-TN-SB", label: "DraftKings Sportsbook MLB Pregame Moneyline" },
+          preassembled: preassembledProjections,
           // No moneyline_slate → market-degraded mode
           ...(simulationOptions ? { simulation: simulationOptions } : {})
         });

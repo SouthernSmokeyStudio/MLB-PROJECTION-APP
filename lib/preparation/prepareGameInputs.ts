@@ -147,6 +147,45 @@ const buildFallbackTeamInputs = (team: CanonicalGame["away"]["team"]): PreparedT
   lineup_avg_woba: null
 });
 
+// Approximate wOBA from MLB Stats API component counting stats.
+// Standard linear weights (2024 season values). These are stable year-to-year
+// within ±0.01. True wOBA requires play-level data not available from the team
+// stats endpoint; this is a component approximation, not OBP.
+// Denominator: PA minus IBB (intentional walks are excluded from wOBA).
+const WOBA_WEIGHTS = {
+  bb: 0.690,
+  hbp: 0.720,
+  single: 0.880,
+  double: 1.265,
+  triple: 1.600,
+  hr: 2.095
+} as const;
+
+const computeApproxTeamWoba = (stat: Record<string, unknown> | null): number | null => {
+  if (!stat) return null;
+  const pa = parseNumericString(stat.plateAppearances);
+  const ibb = parseNumericString(stat.intentionalWalks) ?? 0;
+  const ubb = (parseNumericString(stat.baseOnBalls) ?? 0) - ibb;
+  const hbp = parseNumericString(stat.hitByPitch) ?? 0;
+  const hits = parseNumericString(stat.hits);
+  const doubles = parseNumericString(stat.doubles);
+  const triples = parseNumericString(stat.triples);
+  const hr = parseNumericString(stat.homeRuns);
+  if (pa === null || pa <= 0 || hits === null || doubles === null || triples === null || hr === null) {
+    return null;
+  }
+  const singles = hits - doubles - triples - hr;
+  const numerator =
+    WOBA_WEIGHTS.bb * ubb +
+    WOBA_WEIGHTS.hbp * hbp +
+    WOBA_WEIGHTS.single * singles +
+    WOBA_WEIGHTS.double * doubles +
+    WOBA_WEIGHTS.triple * triples +
+    WOBA_WEIGHTS.hr * hr;
+  const denominator = pa - ibb;
+  return denominator > 0 ? Math.round((numerator / denominator) * 1000) / 1000 : null;
+};
+
 const enrichTeamInputs = (
   team: PreparedTeamInputs,
   seasonHittingPayload?: unknown,
@@ -159,13 +198,27 @@ const enrichTeamInputs = (
   const teamRunsPerGame =
     runs === null || gamesPlayed === null || gamesPlayed <= 0 ? null : runs / gamesPlayed;
 
+  // Approximate team wOBA computed from component stats (BB, HBP, 1B, 2B, 3B, HR).
+  // More accurate than OBP because it applies run-value weights to each outcome.
+  // Falls back to OBP when component stats are absent (provider gave only basic hitting stats).
+  // Still an approximation — not identical to Baseball Savant wOBA which uses
+  // precise linear weights derived from run-expectancy matrices per season.
+  const teamWoba =
+    computeApproxTeamWoba(seasonHittingStat) ??
+    parseNumericString(seasonHittingStat?.obp);
+
+  const pa = parseNumericString(seasonHittingStat?.plateAppearances);
+  const strikeOuts = parseNumericString(seasonHittingStat?.strikeOuts);
+  const baseOnBalls = parseNumericString(seasonHittingStat?.baseOnBalls);
+  const teamKRate = strikeOuts !== null && pa !== null && pa > 0 ? strikeOuts / pa : null;
+  const teamBbRate = baseOnBalls !== null && pa !== null && pa > 0 ? baseOnBalls / pa : null;
+
   return {
     ...team,
     team_runs_per_game: teamRunsPerGame,
-    // Provisional runtime offense proxy only: MLB Stats API team OBP is carried
-    // in team_woba temporarily because true team wOBA is not yet sourced.
-    // This is not final model math.
-    team_woba: parseNumericString(seasonHittingStat?.obp),
+    team_woba: teamWoba,
+    team_k_rate: teamKRate,
+    team_bb_rate: teamBbRate,
     bullpen_era: parseNumericString(reliefPitchingStat?.era)
   };
 };
@@ -366,6 +419,27 @@ export const prepareGameInputs = (
   const awayBatters = data?.away_batters ?? [];
   const homeBatters = data?.home_batters ?? [];
 
+  // Compute lineup_avg_woba from confirmed-order batters when lineup is known.
+  // This flows into computeTeamOffenseFactor as a third signal alongside season
+  // RPG and season wOBA. Only confirmed_order batters count — fallback roster
+  // batters do not represent today's lineup composition.
+  const awayLineupWobas = awayBatters
+    .filter((b) => b.lineup_status === "confirmed_order" && b.season_woba !== null)
+    .map((b) => b.season_woba as number);
+  const homeLineupWobas = homeBatters
+    .filter((b) => b.lineup_status === "confirmed_order" && b.season_woba !== null)
+    .map((b) => b.season_woba as number);
+  const awayLineupAvgWoba =
+    awayLineupWobas.length >= 5
+      ? Math.round((awayLineupWobas.reduce((s, w) => s + w, 0) / awayLineupWobas.length) * 1000) / 1000
+      : null;
+  const homeLineupAvgWoba =
+    homeLineupWobas.length >= 5
+      ? Math.round((homeLineupWobas.reduce((s, w) => s + w, 0) / homeLineupWobas.length) * 1000) / 1000
+      : null;
+  const awayTeamWithLineup: PreparedTeamInputs = { ...awayTeam, lineup_avg_woba: awayLineupAvgWoba };
+  const homeTeamWithLineup: PreparedTeamInputs = { ...homeTeam, lineup_avg_woba: homeLineupAvgWoba };
+
   if (awayBatters.length === 0) {
     reasons.push("Missing away_batters preparation data");
   }
@@ -407,13 +481,13 @@ export const prepareGameInputs = (
     homeStarter !== null &&
     awayStarter.season_era !== null &&
     homeStarter.season_era !== null &&
-    awayTeam.team_runs_per_game !== null &&
-    awayTeam.team_woba !== null &&
-    homeTeam.team_runs_per_game !== null &&
-    homeTeam.team_woba !== null &&
-    awayTeam.bullpen_era !== null &&
-    homeTeam.bullpen_era !== null &&
+    awayTeamWithLineup.team_runs_per_game !== null &&
+    awayTeamWithLineup.team_woba !== null &&
+    homeTeamWithLineup.team_runs_per_game !== null &&
+    homeTeamWithLineup.team_woba !== null &&
+    awayTeamWithLineup.bullpen_era !== null &&
+    homeTeamWithLineup.bullpen_era !== null &&
     game.venue !== null;
 
-  return createPreparedGame(game, preparedAt, awayTeam, homeTeam, awayStarter, homeStarter, awayBatters, homeBatters, reasons, teamLevelReady);
+  return createPreparedGame(game, preparedAt, awayTeamWithLineup, homeTeamWithLineup, awayStarter, homeStarter, awayBatters, homeBatters, reasons, teamLevelReady);
 };

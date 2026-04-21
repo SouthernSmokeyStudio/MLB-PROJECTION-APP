@@ -5,6 +5,7 @@ import type {
 import type { PreparedGameInputs } from "@lib/contracts/prepared";
 import type { BlockedState } from "@lib/contracts/types";
 import { buildGameCard, type GameCard } from "./buildGameCard";
+import { assembleGameProjection, type AssembledGameProjection } from "@lib/projections/assembleGameProjection";
 import {
   buildPlayerCards,
   type BuildPlayerCardOptions,
@@ -445,6 +446,8 @@ export const buildDraftKingsClassicPlayerCards = (
   salaryInput: DraftKingsClassicSalarySlate | readonly LoadedDraftKingsClassicSlateItem[],
   options: BuildPlayerCardOptions & {
     readonly salaryJoinIdentities?: DraftKingsClassicSalaryJoinIdentities;
+    /** Pre-computed game projection. When provided, skips recomputation. */
+    readonly preassembled?: AssembledGameProjection;
   } = {}
 ): DraftKingsClassicPlayerCardsResult => {
   const isSlateArray = Array.isArray(salaryInput);
@@ -458,9 +461,10 @@ export const buildDraftKingsClassicPlayerCards = (
         salary_slate: salaryInput as DraftKingsClassicSalarySlate
       }];
 
+  const assembled = options.preassembled ?? assembleGameProjection(preparedInputs);
   return joinDraftKingsClassicSalaries({
-    game: buildGameCard(preparedInputs),
-    players: buildPlayerCards(preparedInputs, options).players,
+    game: buildGameCard(preparedInputs, {}, assembled),
+    players: buildPlayerCards(preparedInputs, { ...options, assembled }).players,
     salary_slates,
     ...(options.crosswalk ? { crosswalk: options.crosswalk } : {}),
     ...(options.salaryJoinIdentities

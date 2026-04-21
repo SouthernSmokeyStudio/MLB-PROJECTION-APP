@@ -13,6 +13,7 @@ import {
   joinDraftKingsSportsbookMoneylines,
   type DraftKingsSportsbookMoneylineGameCard
 } from "./joinDraftKingsSportsbookMoneylines";
+import type { AssembledGameProjection } from "@lib/projections/assembleGameProjection";
 import type { LiveSlateCounts, LiveSlateSourceGame } from "./loadLiveSlate";
 
 export interface BuildBettingEdgeBoardOptions {
@@ -35,6 +36,8 @@ export interface BuildBettingEdgeBoardOptions {
     readonly seed?: number;
     readonly iterations?: number;
   };
+  /** Pre-computed game projections keyed by game_id. When provided, skips recomputation. */
+  readonly preassembled?: ReadonlyMap<string, AssembledGameProjection>;
 }
 
 const buildMatchupLabel = (sourceGame: LiveSlateSourceGame): string =>
@@ -376,7 +379,9 @@ export const buildBettingEdgeBoard = (
       },
       ready_games: [],
       held_games: heldGames,
-      note: options.note ?? null,
+      note:
+        options.note ??
+        "Betting edge is model-implied only. No calibration against historical results. Use as directional input — not a validated edge signal.",
       pitcher_fallback_count: fallbackGameIds.length,
       pitcher_fallback_game_ids: fallbackGameIds
     };
@@ -385,7 +390,12 @@ export const buildBettingEdgeBoard = (
   const joined = joinDraftKingsSportsbookMoneylines({
     sourceGames,
     moneylineSlate: options.moneyline_slate,
-    ...(options.simulation ? { options: { simulation: options.simulation } } : {})
+    ...(options.simulation || options.preassembled
+      ? { options: {
+          ...(options.simulation ? { simulation: options.simulation } : {}),
+          ...(options.preassembled ? { preassembled: options.preassembled } : {})
+        }}
+      : {})
   });
 
   const rows = joined.games.map((game, index) =>
@@ -438,7 +448,9 @@ export const buildBettingEdgeBoard = (
     },
     ready_games: readyGames,
     held_games: heldGames,
-    note: options.note ?? null,
+    note:
+      options.note ??
+      "Betting edge is model-implied only. No calibration against historical results. Use as directional input — not a validated edge signal.",
     pitcher_fallback_count: fallbackGameIds.length,
     pitcher_fallback_game_ids: fallbackGameIds
   };

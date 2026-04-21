@@ -17,6 +17,7 @@ import {
   type DraftKingsClassicPlayerCard,
   type DraftKingsClassicSalaryJoinIdentities
 } from "./joinDraftKingsClassicSalaries";
+import type { AssembledGameProjection } from "@lib/projections/assembleGameProjection";
 import { buildDfsOwnershipPlaceholder } from "./buildDfsOwnershipPlaceholder";
 import type { LiveSlateCounts, LiveSlateSourceGame } from "./loadLiveSlate";
 import type { IndexedCrosswalk } from "@lib/crosswalk/resolvePlayerIdentity";
@@ -50,6 +51,8 @@ export interface BuildDfsEdgeBoardOptions {
   };
   /** Pre-indexed crosswalk. When omitted, loaded from the committed crosswalk file. */
   readonly crosswalk?: IndexedCrosswalk;
+  /** Pre-computed game projections keyed by game_id. When provided, skips recomputation. */
+  readonly preassembled?: ReadonlyMap<string, AssembledGameProjection>;
 }
 
 const buildMatchupLabel = (sourceGame: LiveSlateSourceGame): string =>
@@ -355,13 +358,15 @@ const buildRows = (
 
   return slateGames.flatMap((sourceGame) => {
     const salaryJoinIdentities = buildSalaryJoinIdentities(sourceGame);
+    const preassembledForGame = options.preassembled?.get(sourceGame.preparedGame.game_id);
     const joinedPlayers = buildDraftKingsClassicPlayerCards(
       sourceGame.preparedGame,
       salaryInput,
       {
         ...(options.simulation ? { simulation: options.simulation } : {}),
         ...(options.crosswalk ? { crosswalk: options.crosswalk } : {}),
-        ...(Object.keys(salaryJoinIdentities).length > 0 ? { salaryJoinIdentities } : {})
+        ...(Object.keys(salaryJoinIdentities).length > 0 ? { salaryJoinIdentities } : {}),
+        ...(preassembledForGame ? { preassembled: preassembledForGame } : {})
       }
     ).players;
 
@@ -494,6 +499,8 @@ export const buildDfsEdgeBoard = (
     ready_pitchers: readyPitchers,
     ready_batters: readyBatters,
     held_players: heldPlayers,
-    note: options.note ?? null
+    note:
+      options.note ??
+      "projected_ownership values are rule-based heuristics (salary rank + position). Not a calibrated model. ownership_source: \"placeholder\" on every row."
   };
 };

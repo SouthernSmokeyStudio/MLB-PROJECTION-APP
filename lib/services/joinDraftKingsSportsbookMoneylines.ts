@@ -5,6 +5,7 @@ import type {
 import type { GameStatus, ISOTimestamp } from "@lib/contracts/types";
 import { normalizeDkTeamAbbreviation } from "@lib/adapters/draftKingsSportsbook";
 import { buildGameCard, type BuildGameCardOptions, type GameCard } from "./buildGameCard";
+import { type AssembledGameProjection } from "@lib/projections/assembleGameProjection";
 import type { LiveSlateSourceGame } from "./loadLiveSlate";
 
 export interface DraftKingsSportsbookMoneylineGameCard extends GameCard {
@@ -134,12 +135,18 @@ export const joinDraftKingsSportsbookMoneylines = ({
 }: {
   readonly sourceGames: readonly LiveSlateSourceGame[];
   readonly moneylineSlate: DraftKingsSportsbookMlbMoneylineSlate;
-  readonly options?: Pick<BuildGameCardOptions, "simulation">;
+  readonly options?: Pick<BuildGameCardOptions, "simulation"> & {
+    /** Pre-computed game projections keyed by game_id. When provided, skips recomputation. */
+    readonly preassembled?: ReadonlyMap<string, AssembledGameProjection>;
+  };
 }): DraftKingsSportsbookMoneylineGameCardsResult => {
   const games = sourceGames.map<DraftKingsSportsbookMoneylineGameCard>((sourceGame) => {
-    const game = buildGameCard(sourceGame.preparedGame, {
-      ...(options.simulation ? { simulation: options.simulation } : {})
-    });
+    const preassembledForGame = options.preassembled?.get(sourceGame.preparedGame.game_id);
+    const game = buildGameCard(
+      sourceGame.preparedGame,
+      { ...(options.simulation ? { simulation: options.simulation } : {}) },
+      preassembledForGame
+    );
 
     if (!game.simulation) {
       return buildHeldGameRow({
@@ -191,7 +198,7 @@ export const joinDraftKingsSportsbookMoneylines = ({
           home_odds: matched.home_odds_american
         }
       }
-    });
+    }, preassembledForGame);
 
     return {
       ...buildBaseGameRow(sourceGame, marketAwareGame),

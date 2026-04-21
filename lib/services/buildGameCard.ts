@@ -79,9 +79,10 @@ const readBlockedState = (
 
 export const buildGameCard = (
   preparedInputs: PreparedGameInputs,
-  options: BuildGameCardOptions = {}
+  options: BuildGameCardOptions = {},
+  preassembled?: AssembledGameProjection
 ): GameCard => {
-  const assembled = assembleGameProjection(preparedInputs);
+  const assembled = preassembled ?? assembleGameProjection(preparedInputs);
   const gameProjection = assembled.game_projection;
   const blocked = readBlockedState(preparedInputs, gameProjection);
   const projectionLineage = createProjectionLineage({

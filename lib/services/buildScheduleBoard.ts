@@ -11,6 +11,7 @@ import type {
 import { asISOTimestamp } from "@lib/contracts/types";
 import { buildGameCard, type BuildGameCardOptions } from "./buildGameCard";
 import { buildPlayerCards } from "./buildPlayerCard";
+import { type AssembledGameProjection } from "@lib/projections/assembleGameProjection";
 import { checkProjectionReconciliation } from "./checkProjectionReconciliation";
 
 export interface ScheduleBoardSourceGame {
@@ -27,6 +28,9 @@ export interface BuildScheduleBoardOptions {
   readonly note?: string | null;
   readonly generated_at?: string;
   readonly simulation?: BuildGameCardOptions["simulation"];
+  /** Pre-computed game projections keyed by game_id. When provided, each board
+   *  consumer reads the shared parent artifact instead of recomputing it. */
+  readonly preassembled?: ReadonlyMap<string, AssembledGameProjection>;
 }
 
 const buildPitcher = (
@@ -70,13 +74,17 @@ const buildScheduleBoardWeather = (
 
 const buildScheduleBoardGame = (
   sourceGame: ScheduleBoardSourceGame,
-  options: Pick<BuildScheduleBoardOptions, "simulation">
+  options: Pick<BuildScheduleBoardOptions, "simulation" | "preassembled">
 ): ScheduleBoardGame => {
-  const gameCard = buildGameCard(sourceGame.preparedGame, {
-    ...(options.simulation ? { simulation: options.simulation } : {})
-  });
+  const preassembledForGame = options.preassembled?.get(sourceGame.preparedGame.game_id);
+  const gameCard = buildGameCard(
+    sourceGame.preparedGame,
+    { ...(options.simulation ? { simulation: options.simulation } : {}) },
+    preassembledForGame
+  );
   const playerCards = buildPlayerCards(sourceGame.preparedGame, {
-    ...(options.simulation ? { simulation: options.simulation } : {})
+    ...(options.simulation ? { simulation: options.simulation } : {}),
+    ...(preassembledForGame ? { assembled: preassembledForGame } : {})
   });
   const reconciliation = checkProjectionReconciliation({
     game: gameCard,

@@ -45,6 +45,12 @@ const buildWeather = (
   apiWeather: import("@lib/adapters/contracts").MlbStatsApiWeather | null
 ): WeatherSummary | null => {
   if (!apiWeather) return null;
+  // MLB Stats API returns weather: {} for scheduled/pregame games.
+  // An empty object passes isRecord() but carries no usable data.
+  // Return null so canonicalGame.weather is cleanly null for those games.
+  if (apiWeather.condition === null && apiWeather.temp === null && apiWeather.wind === null) {
+    return null;
+  }
   const temperatureF = apiWeather.temp != null ? parseFloat(apiWeather.temp) : null;
   const { wind_speed_mph, wind_direction } = parseWindField(apiWeather.wind);
   return {
@@ -270,7 +276,25 @@ const TEAM_METADATA: Record<number, Omit<CanonicalTeam, "team_id" | "sport_id"> 
   }
 };
 
+// Park run factors: 3-year average (2022-2024). Decimal format; 1.0 = neutral.
+// Source: Baseball Reference park factors, runs-based. Coors Field is the
+// single largest outlier (~5280 ft elevation, thin air). All others are
+// meaningful but smaller. Update annually — park factors drift ~0.01/year.
+// Dome/retractable-roof flags: true dome = weather factor always 1.0;
+// retractable = roof-open/closed is game-day dependent (tracked via API).
+// Sutter Health Park (ATH): limited MLB data; conservative neutral estimate.
 const VENUE_METADATA: Record<number, CanonicalVenue> = {
+  // ── American League East ─────────────────────────────────────────────────
+  2: {
+    venue_id: asVenueId("oriole-park-at-camden-yards"),
+    name: "Oriole Park at Camden Yards",
+    city: "Baltimore",
+    state: "MD",
+    country: "USA",
+    is_dome: false,
+    is_retractable_roof: false,
+    park_factor_runs: 1.01
+  },
   3: {
     venue_id: asVenueId("fenway-park"),
     name: "Fenway Park",
@@ -280,6 +304,295 @@ const VENUE_METADATA: Record<number, CanonicalVenue> = {
     is_dome: false,
     is_retractable_roof: false,
     park_factor_runs: 1.04
+  },
+  3313: {
+    venue_id: asVenueId("yankee-stadium"),
+    name: "Yankee Stadium",
+    city: "Bronx",
+    state: "NY",
+    country: "USA",
+    is_dome: false,
+    is_retractable_roof: false,
+    park_factor_runs: 1.03
+  },
+  3289: {
+    venue_id: asVenueId("citi-field"),
+    name: "Citi Field",
+    city: "Queens",
+    state: "NY",
+    country: "USA",
+    is_dome: false,
+    is_retractable_roof: false,
+    park_factor_runs: 0.96
+  },
+  14: {
+    venue_id: asVenueId("rogers-centre"),
+    name: "Rogers Centre",
+    city: "Toronto",
+    state: null,
+    country: "Canada",
+    is_dome: true,
+    is_retractable_roof: true,
+    park_factor_runs: 1.02
+  },
+  12: {
+    venue_id: asVenueId("tropicana-field"),
+    name: "Tropicana Field",
+    city: "St. Petersburg",
+    state: "FL",
+    country: "USA",
+    is_dome: true,
+    is_retractable_roof: false,
+    park_factor_runs: 0.95
+  },
+  // ── American League Central ──────────────────────────────────────────────
+  5: {
+    venue_id: asVenueId("progressive-field"),
+    name: "Progressive Field",
+    city: "Cleveland",
+    state: "OH",
+    country: "USA",
+    is_dome: false,
+    is_retractable_roof: false,
+    park_factor_runs: 0.96
+  },
+  2394: {
+    venue_id: asVenueId("comerica-park"),
+    name: "Comerica Park",
+    city: "Detroit",
+    state: "MI",
+    country: "USA",
+    is_dome: false,
+    is_retractable_roof: false,
+    park_factor_runs: 0.96
+  },
+  7: {
+    venue_id: asVenueId("kauffman-stadium"),
+    name: "Kauffman Stadium",
+    city: "Kansas City",
+    state: "MO",
+    country: "USA",
+    is_dome: false,
+    is_retractable_roof: false,
+    park_factor_runs: 0.97
+  },
+  32: {
+    venue_id: asVenueId("american-family-field"),
+    name: "American Family Field",
+    city: "Milwaukee",
+    state: "WI",
+    country: "USA",
+    is_dome: false,
+    is_retractable_roof: true,
+    park_factor_runs: 1.01
+  },
+  3312: {
+    venue_id: asVenueId("target-field"),
+    name: "Target Field",
+    city: "Minneapolis",
+    state: "MN",
+    country: "USA",
+    is_dome: false,
+    is_retractable_roof: false,
+    park_factor_runs: 0.97
+  },
+  4: {
+    venue_id: asVenueId("rate-field"),
+    name: "Rate Field",
+    city: "Chicago",
+    state: "IL",
+    country: "USA",
+    is_dome: false,
+    is_retractable_roof: false,
+    park_factor_runs: 1.00
+  },
+  // ── American League West ─────────────────────────────────────────────────
+  1: {
+    venue_id: asVenueId("angel-stadium"),
+    name: "Angel Stadium",
+    city: "Anaheim",
+    state: "CA",
+    country: "USA",
+    is_dome: false,
+    is_retractable_roof: false,
+    park_factor_runs: 1.00
+  },
+  2392: {
+    venue_id: asVenueId("daikin-park"),
+    name: "Daikin Park",
+    city: "Houston",
+    state: "TX",
+    country: "USA",
+    is_dome: false,
+    is_retractable_roof: true,
+    park_factor_runs: 1.01
+  },
+  680: {
+    venue_id: asVenueId("t-mobile-park"),
+    name: "T-Mobile Park",
+    city: "Seattle",
+    state: "WA",
+    country: "USA",
+    is_dome: false,
+    is_retractable_roof: true,
+    park_factor_runs: 0.94
+  },
+  5325: {
+    venue_id: asVenueId("globe-life-field"),
+    name: "Globe Life Field",
+    city: "Arlington",
+    state: "TX",
+    country: "USA",
+    is_dome: false,
+    is_retractable_roof: true,
+    park_factor_runs: 1.00
+  },
+  2529: {
+    venue_id: asVenueId("sutter-health-park"),
+    name: "Sutter Health Park",
+    city: "Sacramento",
+    state: "CA",
+    country: "USA",
+    is_dome: false,
+    is_retractable_roof: false,
+    // Limited MLB data (Athletics relocated to Sacramento in 2025).
+    // Conservative neutral estimate; revisit after one full season.
+    park_factor_runs: 0.97
+  },
+  // ── National League East ─────────────────────────────────────────────────
+  4705: {
+    venue_id: asVenueId("truist-park"),
+    name: "Truist Park",
+    city: "Cumberland",
+    state: "GA",
+    country: "USA",
+    is_dome: false,
+    is_retractable_roof: false,
+    park_factor_runs: 1.02
+  },
+  4169: {
+    venue_id: asVenueId("loandepot-park"),
+    name: "loanDepot park",
+    city: "Miami",
+    state: "FL",
+    country: "USA",
+    is_dome: false,
+    is_retractable_roof: true,
+    park_factor_runs: 0.93
+  },
+  3309: {
+    venue_id: asVenueId("nationals-park"),
+    name: "Nationals Park",
+    city: "Washington",
+    state: "DC",
+    country: "USA",
+    is_dome: false,
+    is_retractable_roof: false,
+    park_factor_runs: 0.98
+  },
+  2681: {
+    venue_id: asVenueId("citizens-bank-park"),
+    name: "Citizens Bank Park",
+    city: "Philadelphia",
+    state: "PA",
+    country: "USA",
+    is_dome: false,
+    is_retractable_roof: false,
+    park_factor_runs: 1.04
+  },
+  // ── National League Central ──────────────────────────────────────────────
+  17: {
+    venue_id: asVenueId("wrigley-field"),
+    name: "Wrigley Field",
+    city: "Chicago",
+    state: "IL",
+    country: "USA",
+    is_dome: false,
+    is_retractable_roof: false,
+    park_factor_runs: 1.02
+  },
+  2602: {
+    venue_id: asVenueId("great-american-ball-park"),
+    name: "Great American Ball Park",
+    city: "Cincinnati",
+    state: "OH",
+    country: "USA",
+    is_dome: false,
+    is_retractable_roof: false,
+    park_factor_runs: 1.05
+  },
+  2889: {
+    venue_id: asVenueId("busch-stadium"),
+    name: "Busch Stadium",
+    city: "St. Louis",
+    state: "MO",
+    country: "USA",
+    is_dome: false,
+    is_retractable_roof: false,
+    park_factor_runs: 0.96
+  },
+  31: {
+    venue_id: asVenueId("pnc-park"),
+    name: "PNC Park",
+    city: "Pittsburgh",
+    state: "PA",
+    country: "USA",
+    is_dome: false,
+    is_retractable_roof: false,
+    park_factor_runs: 0.95
+  },
+  // ── National League West ─────────────────────────────────────────────────
+  19: {
+    venue_id: asVenueId("coors-field"),
+    name: "Coors Field",
+    city: "Denver",
+    state: "CO",
+    country: "USA",
+    is_dome: false,
+    is_retractable_roof: false,
+    // Highest park factor in MLB. ~5280 ft elevation; thin air, long ball,
+    // runs score at a rate ~17% above neutral. Not a rounding error.
+    park_factor_runs: 1.17
+  },
+  15: {
+    venue_id: asVenueId("chase-field"),
+    name: "Chase Field",
+    city: "Phoenix",
+    state: "AZ",
+    country: "USA",
+    is_dome: false,
+    is_retractable_roof: true,
+    park_factor_runs: 1.03
+  },
+  22: {
+    venue_id: asVenueId("dodger-stadium"),
+    name: "Dodger Stadium",
+    city: "Los Angeles",
+    state: "CA",
+    country: "USA",
+    is_dome: false,
+    is_retractable_roof: false,
+    park_factor_runs: 0.97
+  },
+  2395: {
+    venue_id: asVenueId("oracle-park"),
+    name: "Oracle Park",
+    city: "San Francisco",
+    state: "CA",
+    country: "USA",
+    is_dome: false,
+    is_retractable_roof: false,
+    park_factor_runs: 0.93
+  },
+  2680: {
+    venue_id: asVenueId("petco-park"),
+    name: "Petco Park",
+    city: "San Diego",
+    state: "CA",
+    country: "USA",
+    is_dome: false,
+    is_retractable_roof: false,
+    park_factor_runs: 0.94
   }
 };
 

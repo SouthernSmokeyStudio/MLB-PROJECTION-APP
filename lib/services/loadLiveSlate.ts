@@ -830,6 +830,13 @@ export const loadLiveSlate = async (
       );
     }
     await Promise.allSettled(fetches);
+
+    // Log forecast outcomes so runtime failures are visible in Vercel logs.
+    const forecastSummary: Record<string, string> = {};
+    for (const [teamId, w] of forecastByHomeTeam.entries()) {
+      forecastSummary[String(teamId)] = w === null ? "null" : `temp=${String(w.temperature_f)} cond=${String(w.conditions)}`;
+    }
+    console.log("[loadLiveSlate] forecast pre-fetch", JSON.stringify({ fetched: fetches.length, results: forecastSummary }));
   }
 
   for (const game of normalizedGames) {

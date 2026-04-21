@@ -194,15 +194,18 @@ const buildOverview = ({
   blocked_games: schedule.summary.blocked_games
 });
 
+const SNAPSHOT_HONESTY_NOTE =
+  "Smoke Signal is a current-snapshot synthesis of model outputs. It reflects no trend, line movement, or real-time intelligence. Values are deterministic from the latest projection run.";
+
 const buildMissingSignalNote = (
   missingSignals: readonly string[],
   fallbackNote: string | null | undefined
 ): string | null => {
   if (missingSignals.length === 0) {
-    return fallbackNote ?? null;
+    return fallbackNote ?? SNAPSHOT_HONESTY_NOTE;
   }
 
-  return fallbackNote ?? `Some Smoke Signal highlights are unavailable: ${missingSignals.join(", ")}.`;
+  return fallbackNote ?? `${SNAPSHOT_HONESTY_NOTE} Some highlights are unavailable: ${missingSignals.join(", ")}.`;
 };
 
 export const buildSmokeSignal = (

@@ -24,6 +24,9 @@ export interface BuildPlayerBoardOptions {
   readonly note?: string | null;
   readonly generated_at?: string;
   readonly simulation?: BuildPlayerCardOptions["simulation"];
+  /** Pre-computed game projections keyed by game_id. When provided, each game
+   *  projection runs exactly once and player cards read the shared artifact. */
+  readonly preassembled?: ReadonlyMap<string, AssembledGameProjection>;
 }
 
 // ---------------------------------------------------------------------------
@@ -188,7 +191,9 @@ export const buildPlayerBoard = (
 
   const assembledSourceGames: AssembledSourceGame[] = sourceGames.map((sourceGame) => ({
     sourceGame,
-    assembledProjection: assembleGameProjection(sourceGame.preparedGame)
+    assembledProjection:
+      options.preassembled?.get(sourceGame.preparedGame.game_id) ??
+      assembleGameProjection(sourceGame.preparedGame)
   }));
 
   const players = assembledSourceGames

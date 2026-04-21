@@ -81,10 +81,20 @@ export const fetchVenueWeather = async (
   });
 
   const result = await fetchWithTimeout(
-    `${OPEN_METEO_ENDPOINT}?${searchParams.toString()}`
+    `${OPEN_METEO_ENDPOINT}?${searchParams.toString()}`,
+    // Opt out of Next.js Data Cache — forecast data must always be fresh.
+    // Without this, Next.js 14's extended fetch may serve a stale/null
+    // cached response from a prior request or build-time prefetch.
+    { cache: "no-store" } as RequestInit
   );
 
-  if (result.response === null || !result.response.ok) return null;
+  if (result.response === null || !result.response.ok) {
+    console.warn(
+      "[openMeteo] fetch failed",
+      JSON.stringify({ lat, lng, gameStartUtc, error: result.error, status: result.response?.status ?? null })
+    );
+    return null;
+  }
 
   let payload: unknown;
   try {
@@ -117,7 +127,13 @@ export const fetchVenueWeather = async (
   // Match by UTC hour prefix: "2026-04-20T23:40:00Z" → "2026-04-20T23"
   const gameHour = gameStartUtc.slice(0, 13);
   const idx = (times as string[]).findIndex((t) => t.startsWith(gameHour));
-  if (idx === -1) return null;
+  if (idx === -1) {
+    console.warn(
+      "[openMeteo] hour match failed",
+      JSON.stringify({ lat, lng, gameStartUtc, gameHour, firstTime: (times as string[])[0] ?? null, lastTime: (times as string[])[(times as string[]).length - 1] ?? null })
+    );
+    return null;
+  }
 
   const rawTemp = temperatures[idx];
   const rawWindSpeed = windSpeeds[idx];
