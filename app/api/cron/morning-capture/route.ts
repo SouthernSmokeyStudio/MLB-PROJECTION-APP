@@ -232,73 +232,80 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     ? loadedMoneylineSlate.error
     : loadedMoneylineSlate.data.note;
 
-  const slatePayload = buildSlateSnapshot(sourceGames, {
-    source: SNAPSHOT_SOURCE,
-    date,
-    generated_at: generatedAt,
-    counts,
-    // Thread the pre-assembled parent truth into the snapshot builder so all
-    // boards in the published snapshot use exactly the same projections as the
-    // player persistence rows (step 4) and game_projections rows (step 7).
-    preassembled: allAssembledProjections,
-    simulation: DEFAULT_SIMULATION,
-    schedule: {
-      source: liveSlateResult.data.source,
-      note: mlbError ?? liveNote
-    },
-    player_projections: {
-      source: liveSlateResult.data.source,
-      note: mlbError ?? liveNote
-    },
-    ...(!loadedDraftKingsSlate.success || loadedDraftKingsSlate.data.slates.length === 0
-      ? {
-          dfs_edge_degraded: {
-            source: DFS_EDGE_SOURCE,
-            note:
-              dfsEdgeReason ??
-              "No DraftKings Classic salary captured for this date -- projections only."
+  let slatePayload: ReturnType<typeof buildSlateSnapshot>;
+  try {
+    slatePayload = buildSlateSnapshot(sourceGames, {
+      source: SNAPSHOT_SOURCE,
+      date,
+      generated_at: generatedAt,
+      counts,
+      // Thread the pre-assembled parent truth into the snapshot builder so all
+      // boards in the published snapshot use exactly the same projections as the
+      // player persistence rows (step 4) and game_projections rows (step 7).
+      preassembled: allAssembledProjections,
+      simulation: DEFAULT_SIMULATION,
+      schedule: {
+        source: liveSlateResult.data.source,
+        note: mlbError ?? liveNote
+      },
+      player_projections: {
+        source: liveSlateResult.data.source,
+        note: mlbError ?? liveNote
+      },
+      ...(!loadedDraftKingsSlate.success || loadedDraftKingsSlate.data.slates.length === 0
+        ? {
+            dfs_edge_degraded: {
+              source: DFS_EDGE_SOURCE,
+              note:
+                dfsEdgeReason ??
+                "No DraftKings Classic salary captured for this date -- projections only."
+            }
           }
-        }
-      : !hasProjectablePlayers
-      ? {
-          dfs_edge_reason:
-            "Player projections unavailable -- DFS edge requires at least one projected starter or lineup."
-        }
-      : {
-          dfs_edge: {
-            source: DFS_EDGE_SOURCE,
-            note: liveNote,
-            draftkings_classic: {
-              draft_group_id: loadedDraftKingsSlate.data.slates[0]!.draft_group_id,
-              label: loadedDraftKingsSlate.data.slates[0]!.label,
-              min_start_time: loadedDraftKingsSlate.data.slates[0]!.min_start_time,
-              max_start_time: loadedDraftKingsSlate.data.slates[0]!.max_start_time,
-              tags: []
-            },
-            salary_slate_inventory: loadedDraftKingsSlate.data.slates
+        : !hasProjectablePlayers
+        ? {
+            dfs_edge_reason:
+              "Player projections unavailable -- DFS edge requires at least one projected starter or lineup."
           }
-        }),
-    ...(!loadedMoneylineSlate.success || !loadedMoneylineSlate.data.moneyline_slate
-      ? {
-          betting_edge_degraded: {
-            source: BETTING_EDGE_SOURCE,
-            note:
-              bettingEdgeReason ??
-              "No DraftKings Sportsbook moneyline captured for this date -- projections only."
+        : {
+            dfs_edge: {
+              source: DFS_EDGE_SOURCE,
+              note: liveNote,
+              draftkings_classic: {
+                draft_group_id: loadedDraftKingsSlate.data.slates[0]!.draft_group_id,
+                label: loadedDraftKingsSlate.data.slates[0]!.label,
+                min_start_time: loadedDraftKingsSlate.data.slates[0]!.min_start_time,
+                max_start_time: loadedDraftKingsSlate.data.slates[0]!.max_start_time,
+                tags: []
+              },
+              salary_slate_inventory: loadedDraftKingsSlate.data.slates
+            }
+          }),
+      ...(!loadedMoneylineSlate.success || !loadedMoneylineSlate.data.moneyline_slate
+        ? {
+            betting_edge_degraded: {
+              source: BETTING_EDGE_SOURCE,
+              note:
+                bettingEdgeReason ??
+                "No DraftKings Sportsbook moneyline captured for this date -- projections only."
+            }
           }
-        }
-      : {
-          betting_edge: {
-            source: BETTING_EDGE_SOURCE,
-            note: loadedMoneylineSlate.data.note ?? liveNote,
-            draftkings_sportsbook_moneyline: {
-              site: loadedMoneylineSlate.data.moneyline_slate.site,
-              label: BETTING_EDGE_LABEL
-            },
-            moneyline_slate: loadedMoneylineSlate.data.moneyline_slate
-          }
-        })
-  });
+        : {
+            betting_edge: {
+              source: BETTING_EDGE_SOURCE,
+              note: loadedMoneylineSlate.data.note ?? liveNote,
+              draftkings_sportsbook_moneyline: {
+                site: loadedMoneylineSlate.data.moneyline_slate.site,
+                label: BETTING_EDGE_LABEL
+              },
+              moneyline_slate: loadedMoneylineSlate.data.moneyline_slate
+            }
+          })
+    });
+  } catch (err) {
+    const error = err instanceof Error ? err.message : String(err);
+    results.snapshot = { ok: false, error };
+    return NextResponse.json({ ok: false, date, results }, { status: 500 });
+  }
 
   // ── Step 6: Publish to published_slate_snapshot ─────────────────────────────
   const hasBlockedSections = slatePayload.publication.blocked_sections.length > 0;
