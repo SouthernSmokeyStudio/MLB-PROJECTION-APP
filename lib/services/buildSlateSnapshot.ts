@@ -138,7 +138,7 @@ const buildBettingStatus = (payload: BettingEdgeBoardPayload): SlateSnapshotSect
   }
 
   if (payload.summary.ready_games > 0) {
-    return buildStatus("ready");
+    return buildStatus("ready", payload.note ?? undefined);
   }
 
   return buildStatus(

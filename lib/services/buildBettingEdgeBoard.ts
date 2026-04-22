@@ -414,9 +414,9 @@ export const buildBettingEdgeBoard = (
     .map(buildTopEdgeSide)
     .filter((game): game is BettingEdgeBoardTopSide => game !== null)
     .sort((left, right) => right.edge - left.edge)[0] ?? null;
-  const totalReadyEdge = readyGames.reduce((sum, game) => {
-    const edge = getTopSide(game).edge;
-    return sum + (edge ?? 0);
+  const readyGamesWithEdge = readyGames.filter((game) => getTopSide(game).edge !== null);
+  const totalReadyEdge = readyGamesWithEdge.reduce((sum, game) => {
+    return sum + (getTopSide(game).edge as number);
   }, 0);
 
   const allRows = [...readyGames, ...heldGames];
@@ -438,7 +438,7 @@ export const buildBettingEdgeBoard = (
       total_games: rows.length,
       ready_games: readyGames.length,
       held_games: heldGames.length,
-      average_ready_edge: readyGames.length === 0 ? null : totalReadyEdge / readyGames.length,
+      average_ready_edge: readyGamesWithEdge.length === 0 ? null : totalReadyEdge / readyGamesWithEdge.length,
       top_edge_side: topEdgeSide
     },
     counts: {
