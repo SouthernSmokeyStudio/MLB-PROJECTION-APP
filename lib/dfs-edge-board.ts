@@ -1,7 +1,8 @@
 import type {
   DfsEdgeBoardCounts,
   DfsEdgeBoardPayload,
-  DfsEdgeBoardRow
+  DfsEdgeBoardRow,
+  DfsJoinDiagnostics
 } from "@lib/contracts/dfs-edge-board";
 import {
   asGameId,
@@ -359,6 +360,49 @@ const parseDraftKingsSummary = (
   };
 };
 
+const readDiagnosticCount = (record: Record<string, unknown>, field: string): number => {
+  const v = record[field];
+  return typeof v === "number" && Number.isFinite(v) && v >= 0 ? Math.round(v) : 0;
+};
+
+const parseJoinDiagnostics = (value: unknown): DfsJoinDiagnostics => {
+  // Fail-safe: older payloads without join_diagnostics return all-zero diagnostics.
+  if (!isRecord(value)) {
+    return {
+      resolver_method_counts: {
+        mlb_stats_api_id: 0, dk_player_id: 0, rotowire_slug: 0,
+        name_and_team: 0, unresolved: 0, legacy: 0
+      },
+      held_reason_counts: {
+        reconciliation_failure: 0, upstream_blocked: 0, no_fantasy_summary: 0,
+        crosswalk_unresolved: 0, crosswalk_no_dk_link: 0, salary_miss: 0
+      },
+      reconciliation_failures_by_game: 0
+    };
+  }
+  const rm = isRecord(value.resolver_method_counts) ? value.resolver_method_counts : {};
+  const hr = isRecord(value.held_reason_counts) ? value.held_reason_counts : {};
+  return {
+    resolver_method_counts: {
+      mlb_stats_api_id: readDiagnosticCount(rm, "mlb_stats_api_id"),
+      dk_player_id: readDiagnosticCount(rm, "dk_player_id"),
+      rotowire_slug: readDiagnosticCount(rm, "rotowire_slug"),
+      name_and_team: readDiagnosticCount(rm, "name_and_team"),
+      unresolved: readDiagnosticCount(rm, "unresolved"),
+      legacy: readDiagnosticCount(rm, "legacy")
+    },
+    held_reason_counts: {
+      reconciliation_failure: readDiagnosticCount(hr, "reconciliation_failure"),
+      upstream_blocked: readDiagnosticCount(hr, "upstream_blocked"),
+      no_fantasy_summary: readDiagnosticCount(hr, "no_fantasy_summary"),
+      crosswalk_unresolved: readDiagnosticCount(hr, "crosswalk_unresolved"),
+      crosswalk_no_dk_link: readDiagnosticCount(hr, "crosswalk_no_dk_link"),
+      salary_miss: readDiagnosticCount(hr, "salary_miss")
+    },
+    reconciliation_failures_by_game: readDiagnosticCount(value, "reconciliation_failures_by_game")
+  };
+};
+
 export const parseDfsEdgeBoardPayload = (value: unknown): DfsEdgeBoardPayload => {
   if (!isRecord(value)) {
     throw new Error("DFS edge payload must be an object.");
@@ -404,6 +448,7 @@ export const parseDfsEdgeBoardPayload = (value: unknown): DfsEdgeBoardPayload =>
         : null
     },
     counts: parseCounts(value.counts),
+    join_diagnostics: parseJoinDiagnostics(value.join_diagnostics),
     ready_pitchers: value.ready_pitchers.map(parseRow),
     ready_batters: value.ready_batters.map(parseRow),
     held_players: value.held_players.map(parseRow),

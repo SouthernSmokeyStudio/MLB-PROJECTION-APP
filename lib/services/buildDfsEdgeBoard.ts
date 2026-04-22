@@ -2,7 +2,8 @@ import type {
   DfsEdgeBoardCounts,
   DfsEdgeBoardPayload,
   DfsEdgeBoardPlayerHighlight,
-  DfsEdgeBoardRow
+  DfsEdgeBoardRow,
+  DfsJoinDiagnostics
 } from "@lib/contracts/dfs-edge-board";
 import type { DraftKingsClassicSalarySlate } from "@lib/contracts/draftkings-classic";
 import {
@@ -300,7 +301,7 @@ const buildSalaryJoinIdentities = (
 const buildRows = (
   sourceGames: readonly LiveSlateSourceGame[],
   options: BuildDfsEdgeBoardOptions
-): readonly DfsEdgeBoardRow[] => {
+): { rows: readonly DfsEdgeBoardRow[]; join_diagnostics: DfsJoinDiagnostics } => {
   // Resolve the slate input: inventory wins; fall back to single-slate wrapper
   const salaryInput: readonly LoadedDraftKingsClassicSlateItem[] | DraftKingsClassicSalarySlate =
     options.salary_slate_inventory ??
@@ -356,10 +357,22 @@ const buildRows = (
       ? sourceGames
       : filteredSlateGames;
 
-  return slateGames.flatMap((sourceGame) => {
+  const aggregatedDiagnostics = {
+    resolver_method_counts: {
+      mlb_stats_api_id: 0, dk_player_id: 0, rotowire_slug: 0,
+      name_and_team: 0, unresolved: 0, legacy: 0
+    },
+    held_reason_counts: {
+      reconciliation_failure: 0, upstream_blocked: 0, no_fantasy_summary: 0,
+      crosswalk_unresolved: 0, crosswalk_no_dk_link: 0, salary_miss: 0
+    },
+    reconciliation_failures_by_game: 0
+  };
+
+  const rows = slateGames.flatMap((sourceGame) => {
     const salaryJoinIdentities = buildSalaryJoinIdentities(sourceGame);
     const preassembledForGame = options.preassembled?.get(sourceGame.preparedGame.game_id);
-    const joinedPlayers = buildDraftKingsClassicPlayerCards(
+    const joinResult = buildDraftKingsClassicPlayerCards(
       sourceGame.preparedGame,
       salaryInput,
       {
@@ -368,13 +381,36 @@ const buildRows = (
         ...(Object.keys(salaryJoinIdentities).length > 0 ? { salaryJoinIdentities } : {}),
         ...(preassembledForGame ? { preassembled: preassembledForGame } : {})
       }
-    ).players;
+    );
 
-    return joinedPlayers
+    const d = joinResult.join_diagnostics;
+    aggregatedDiagnostics.reconciliation_failures_by_game += d.reconciliation_failures_by_game;
+    for (const k of Object.keys(d.resolver_method_counts) as (keyof typeof d.resolver_method_counts)[]) {
+      aggregatedDiagnostics.resolver_method_counts[k] += d.resolver_method_counts[k];
+    }
+    for (const k of Object.keys(d.held_reason_counts) as (keyof typeof d.held_reason_counts)[]) {
+      aggregatedDiagnostics.held_reason_counts[k] += d.held_reason_counts[k];
+    }
+
+    return joinResult.players
       .map((player) => toDfsEdgeBoardRow(sourceGame, player))
       .filter((player): player is DfsEdgeBoardRow => player !== null);
   });
+
+  return { rows, join_diagnostics: aggregatedDiagnostics };
 };
+const createEmptyJoinDiagnostics = (): DfsJoinDiagnostics => ({
+  resolver_method_counts: {
+    mlb_stats_api_id: 0, dk_player_id: 0, rotowire_slug: 0,
+    name_and_team: 0, unresolved: 0, legacy: 0
+  },
+  held_reason_counts: {
+    reconciliation_failure: 0, upstream_blocked: 0, no_fantasy_summary: 0,
+    crosswalk_unresolved: 0, crosswalk_no_dk_link: 0, salary_miss: 0
+  },
+  reconciliation_failures_by_game: 0
+});
+
 const createEmptySummary = () => ({
   total_players: 0,
   ready_players: 0,
@@ -409,6 +445,7 @@ export const createEmptyDfsEdgeBoard = ({
   draftkings_classic,
   summary: createEmptySummary(),
   counts,
+  join_diagnostics: createEmptyJoinDiagnostics(),
   ready_pitchers: [],
   ready_batters: [],
   held_players: [],
@@ -419,14 +456,14 @@ export const buildDfsEdgeBoard = (
   sourceGames: readonly LiveSlateSourceGame[],
   options: BuildDfsEdgeBoardOptions
 ): DfsEdgeBoardPayload => {
-  const rawPlayers = buildRows(sourceGames, options);
+  const { rows: rawRows, join_diagnostics } = buildRows(sourceGames, options);
 
   // Salary-degraded mode: draftkings_classic was not supplied. Override every
   // held row's blocked reason to "salary-unavailable" so the UI can surface an
   // honest reason instead of internal join-miss messages.
   const players: readonly DfsEdgeBoardRow[] = options.draftkings_classic
-    ? rawPlayers
-    : rawPlayers.map((p) => ({
+    ? rawRows
+    : rawRows.map((p) => ({
         ...p,
         draftkings_classic: {
           ...p.draftkings_classic,
@@ -496,6 +533,7 @@ export const buildDfsEdgeBoard = (
         : 0,
       matched_salaries: options.draftkings_classic ? matchedSalaries : 0
     },
+    join_diagnostics,
     ready_pitchers: readyPitchers,
     ready_batters: readyBatters,
     held_players: heldPlayers,

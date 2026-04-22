@@ -44,6 +44,30 @@ export interface DfsEdgeBoardSummary {
   readonly top_value_player: DfsEdgeBoardPlayerHighlight | null;
 }
 
+export interface DfsJoinDiagnosticsResolverCounts {
+  readonly mlb_stats_api_id: number;
+  readonly dk_player_id: number;
+  readonly rotowire_slug: number;
+  readonly name_and_team: number;
+  readonly unresolved: number;
+  readonly legacy: number;
+}
+
+export interface DfsJoinDiagnosticsHeldReasonCounts {
+  readonly reconciliation_failure: number;
+  readonly upstream_blocked: number;
+  readonly no_fantasy_summary: number;
+  readonly crosswalk_unresolved: number;
+  readonly crosswalk_no_dk_link: number;
+  readonly salary_miss: number;
+}
+
+export interface DfsJoinDiagnostics {
+  readonly resolver_method_counts: DfsJoinDiagnosticsResolverCounts;
+  readonly held_reason_counts: DfsJoinDiagnosticsHeldReasonCounts;
+  readonly reconciliation_failures_by_game: number;
+}
+
 export interface DfsEdgeBoardCounts extends PlayerBoardCounts {
   readonly salary_entries: number;
   readonly matched_salaries: number;
@@ -88,6 +112,7 @@ export interface DfsEdgeBoardPayload {
   readonly draftkings_classic: DfsEdgeBoardDraftKingsSummary | null;
   readonly summary: DfsEdgeBoardSummary;
   readonly counts: DfsEdgeBoardCounts;
+  readonly join_diagnostics: DfsJoinDiagnostics;
   readonly ready_pitchers: readonly DfsEdgeBoardRow[];
   readonly ready_batters: readonly DfsEdgeBoardRow[];
   readonly held_players: readonly DfsEdgeBoardRow[];

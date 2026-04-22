@@ -2,6 +2,7 @@ import type {
   DraftKingsClassicJoinState,
   DraftKingsClassicSalarySlate
 } from "@lib/contracts/draftkings-classic";
+import type { DfsJoinDiagnostics } from "@lib/contracts/dfs-edge-board";
 import type { PreparedGameInputs } from "@lib/contracts/prepared";
 import type { BlockedState } from "@lib/contracts/types";
 import { buildGameCard, type GameCard } from "./buildGameCard";
@@ -48,6 +49,7 @@ export interface DraftKingsClassicPlayerCardsResult {
   readonly ready_players: number;
   readonly held_players: number;
   readonly players: readonly DraftKingsClassicPlayerCard[];
+  readonly join_diagnostics: DfsJoinDiagnostics;
 }
 
 /**
@@ -240,7 +242,19 @@ export const joinDraftKingsClassicSalaries = ({
       },
       ready_players: 0,
       held_players: heldPlayers.length,
-      players: heldPlayers
+      players: heldPlayers,
+      join_diagnostics: {
+        resolver_method_counts: {
+          mlb_stats_api_id: 0, dk_player_id: 0, rotowire_slug: 0,
+          name_and_team: 0, unresolved: 0, legacy: 0
+        },
+        held_reason_counts: {
+          reconciliation_failure: heldPlayers.length,
+          upstream_blocked: 0, no_fantasy_summary: 0,
+          crosswalk_unresolved: 0, crosswalk_no_dk_link: 0, salary_miss: 0
+        },
+        reconciliation_failures_by_game: 1
+      }
     };
   }
 
@@ -375,8 +389,18 @@ export const joinDraftKingsClassicSalaries = ({
     );
   };
 
+  const resolverMethodCounts = {
+    mlb_stats_api_id: 0, dk_player_id: 0, rotowire_slug: 0,
+    name_and_team: 0, unresolved: 0, legacy: 0
+  };
+  const heldReasonCounts = {
+    reconciliation_failure: 0, upstream_blocked: 0, no_fantasy_summary: 0,
+    crosswalk_unresolved: 0, crosswalk_no_dk_link: 0, salary_miss: 0
+  };
+
   const joinedPlayers = players.map<DraftKingsClassicPlayerCard>((player) => {
     if (player.blocked.is_blocked) {
+      heldReasonCounts.upstream_blocked++;
       return toHeldPlayer(
         player,
         defaultDraftGroupId,
@@ -385,6 +409,7 @@ export const joinDraftKingsClassicSalaries = ({
     }
 
     if (!player.fantasy_summary) {
+      heldReasonCounts.no_fantasy_summary++;
       return toHeldPlayer(
         player,
         defaultDraftGroupId,
@@ -398,6 +423,13 @@ export const joinDraftKingsClassicSalaries = ({
       for (const idx of slateIndices) {
         const matched = matchSalaryViaCrosswalk(player, crosswalk, idx.salaryByPlayerId);
         if (matched) {
+          // Track resolver method for this successful crosswalk join (pure observation).
+          const resolution = resolvePlayerIdentity(crosswalk, {
+            mlb_stats_api_id: player.mlb_stats_api_id,
+            player_id: player.player_id,
+            team_abbreviation: player.team_id.toUpperCase()
+          });
+          resolverMethodCounts[resolution.resolved_via ?? "unresolved"]++;
           return toReadyPlayer(player, matched, idx.item.draft_group_id);
         }
       }
@@ -409,6 +441,14 @@ export const joinDraftKingsClassicSalaries = ({
         team_abbreviation: player.team_id.toUpperCase()
       });
 
+      if (resolution.canonical_player_id === null) {
+        resolverMethodCounts.unresolved++;
+        heldReasonCounts.crosswalk_unresolved++;
+      } else {
+        resolverMethodCounts[resolution.resolved_via ?? "unresolved"]++;
+        heldReasonCounts.crosswalk_no_dk_link++;
+      }
+
       return buildMissingSalaryPlayer(
         player,
         resolution.canonical_player_id === null ? "unresolved" : "no_dk_link"
@@ -416,11 +456,13 @@ export const joinDraftKingsClassicSalaries = ({
     } else {
       // Legacy path: mlb_stats_api_id / player_id primary match across all slates,
       // then name+team fallback across all slates
+      resolverMethodCounts.legacy++;
       const matched = findSalaryInSlates(player);
       if (matched) {
         return toReadyPlayer(player, matched.salary, matched.draftGroupId);
       }
 
+      heldReasonCounts.salary_miss++;
       return buildMissingSalaryPlayer(player, null);
     }
   });
@@ -437,7 +479,12 @@ export const joinDraftKingsClassicSalaries = ({
     },
     ready_players: joinedPlayers.length - heldPlayers,
     held_players: heldPlayers,
-    players: joinedPlayers
+    players: joinedPlayers,
+    join_diagnostics: {
+      resolver_method_counts: resolverMethodCounts,
+      held_reason_counts: heldReasonCounts,
+      reconciliation_failures_by_game: 0
+    }
   };
 };
 
