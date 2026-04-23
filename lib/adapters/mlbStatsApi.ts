@@ -4,7 +4,7 @@ import type {
   PreparedPitcherInputs,
   PreparedTeamInputs
 } from "@lib/contracts/prepared";
-import { asISOTimestamp, asPlayerId, err, ok, type Result } from "@lib/contracts/types";
+import { asISOTimestamp, asPlayerId, err, ok, type Handedness, type Result } from "@lib/contracts/types";
 import type { GamePreparationData } from "@lib/preparation";
 import type {
   MlbStatsApiGameAdapter,
@@ -743,7 +743,8 @@ export const buildPreparedStarterFromPeopleStats = (
   canonicalPlayerId: ReturnType<typeof asPlayerId>,
   teamId: PreparedTeamInputs["team_id"],
   payload: unknown,
-  mlbStatsApiId?: string | null
+  mlbStatsApiId?: string | null,
+  handedness: Handedness = "unknown"
 ): PreparedPitcherInputs | null => {
   const payloadRecord = readNullableRecord(payload);
   const stats = payloadRecord && Array.isArray(payloadRecord.stats) ? payloadRecord.stats : null;
@@ -769,7 +770,7 @@ export const buildPreparedStarterFromPeopleStats = (
     player_id: canonicalPlayerId,
     mlb_stats_api_id: mlbStatsApiId ?? null,
     team_id: teamId,
-    handedness: "unknown",
+    handedness,
     season_ip: seasonIp,
     season_era: parseNumericString(stat.era),
     season_whip: parseNumericString(stat.whip),
@@ -879,7 +880,30 @@ export const buildPreparedBatterFromPeopleStats = (
     season_k_rate: parseRate(stat.strikeOuts, stat.plateAppearances),
     season_bb_rate: parseRate(stat.baseOnBalls, stat.plateAppearances),
     season_hr_rate: parseRate(stat.homeRuns, stat.plateAppearances),
-    season_sb: parseIntegerLike(stat.stolenBases)
+    season_sb: parseIntegerLike(stat.stolenBases),
+    season_woba: (() => {
+      const pa = parseIntegerLike(stat.plateAppearances);
+      const ibb = parseIntegerLike(stat.intentionalWalks) ?? 0;
+      const ubb = (parseIntegerLike(stat.baseOnBalls) ?? 0) - ibb;
+      const hbp = parseIntegerLike(stat.hitByPitch) ?? 0;
+      const hits = parseIntegerLike(stat.hits);
+      const doubles = parseIntegerLike(stat.doubles);
+      const triples = parseIntegerLike(stat.triples);
+      const hr = parseIntegerLike(stat.homeRuns);
+      if (pa === null || pa <= 0 || hits === null || doubles === null || triples === null || hr === null) {
+        return null;
+      }
+      const singles = hits - doubles - triples - hr;
+      const numerator =
+        0.690 * ubb +
+        0.720 * hbp +
+        0.880 * singles +
+        1.265 * doubles +
+        1.600 * triples +
+        2.095 * hr;
+      const denominator = pa - ibb;
+      return denominator > 0 ? Math.round((numerator / denominator) * 1000) / 1000 : null;
+    })()
   };
 };
 

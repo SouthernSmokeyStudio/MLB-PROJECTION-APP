@@ -942,7 +942,8 @@ export const loadLiveSlate = async (
                 mergedCanonical.away.probable_pitcher.player_id,
                 mergedCanonical.away.team.team_id,
                 awayPitcherStats.data,
-                mergedCanonical.away.probable_pitcher.mlb_stats_api_id
+                mergedCanonical.away.probable_pitcher.mlb_stats_api_id,
+                mergedCanonical.away.probable_pitcher.handedness
               )
             : null;
 
@@ -952,7 +953,8 @@ export const loadLiveSlate = async (
                 mergedCanonical.home.probable_pitcher.player_id,
                 mergedCanonical.home.team.team_id,
                 homePitcherStats.data,
-                mergedCanonical.home.probable_pitcher.mlb_stats_api_id
+                mergedCanonical.home.probable_pitcher.mlb_stats_api_id,
+                mergedCanonical.home.probable_pitcher.handedness
               )
             : null;
 
