@@ -4,6 +4,7 @@ import type { PreparedGameInputs } from "@lib/contracts/prepared";
 import type {
   ScheduleBoardCounts,
   ScheduleBoardGame,
+  ScheduleBoardInputCoverage,
   ScheduleBoardPayload,
   ScheduleBoardPitcher,
   ScheduleBoardWeather
@@ -133,7 +134,15 @@ const buildScheduleBoardGame = (
       home_win_probability: gameCard.simulation?.home_win_probability ?? null,
       average_total_runs: gameCard.simulation?.average_total_runs ?? null
     },
-    weather: buildScheduleBoardWeather(sourceGame.canonicalGame.weather ?? null)
+    weather: buildScheduleBoardWeather(sourceGame.canonicalGame.weather ?? null),
+    input_coverage: {
+      away_pitcher_handedness: sourceGame.preparedGame.away_starter?.handedness ?? "unknown",
+      home_pitcher_handedness: sourceGame.preparedGame.home_starter?.handedness ?? "unknown",
+      away_lineup_avg_woba: sourceGame.preparedGame.away_team.lineup_avg_woba,
+      home_lineup_avg_woba: sourceGame.preparedGame.home_team.lineup_avg_woba,
+      away_woba_batter_count: sourceGame.preparedGame.away_batters.filter((b) => b.season_woba !== null).length,
+      home_woba_batter_count: sourceGame.preparedGame.home_batters.filter((b) => b.season_woba !== null).length
+    } satisfies ScheduleBoardInputCoverage
   };
 };
 

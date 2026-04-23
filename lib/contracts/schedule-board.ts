@@ -45,6 +45,15 @@ export interface ScheduleBoardWeather {
   readonly dome_closed: boolean | null;
 }
 
+export interface ScheduleBoardInputCoverage {
+  readonly away_pitcher_handedness: Handedness;
+  readonly home_pitcher_handedness: Handedness;
+  readonly away_lineup_avg_woba: number | null;
+  readonly home_lineup_avg_woba: number | null;
+  readonly away_woba_batter_count: number;
+  readonly home_woba_batter_count: number;
+}
+
 export interface ScheduleBoardGame {
   readonly game_id: GameId;
   readonly scheduled_start: ISOTimestamp;
@@ -58,6 +67,7 @@ export interface ScheduleBoardGame {
   readonly player_projection_status: ScheduleBoardPlayerProjectionStatus;
   readonly projection: ScheduleBoardProjection;
   readonly weather: ScheduleBoardWeather | null;
+  readonly input_coverage: ScheduleBoardInputCoverage;
 }
 
 export interface ScheduleBoardSummary {
