@@ -9,6 +9,7 @@ import { buildGameCard } from "../../lib/services/buildGameCard";
 import { buildPlayerCards } from "../../lib/services/buildPlayerCard";
 import { buildPlayerBoard } from "../../lib/services/buildPlayerBoard";
 import { buildScheduleBoard } from "../../lib/services/buildScheduleBoard";
+import { parseScheduleBoardPayload } from "../../lib/schedule-board";
 
 
 const prepared = preparedFixture as unknown as PreparedGameInputs;
@@ -145,6 +146,14 @@ describe("phase 9 services", () => {
     expect(board.games[0]?.away_team.probable_pitcher?.full_name).toBe("Gerrit Cole");
     expect(board.games[0]?.home_team.probable_pitcher?.full_name).toBe("Chris Sale");
     expect(board.games[0]?.projection.projected_total).toBeGreaterThan(0);
+    // input_coverage — fixture has both starters set with known handedness,
+    // 9 batters per team all with non-null season_woba
+    expect(board.games[0]?.input_coverage.away_pitcher_handedness).toBe("R");
+    expect(board.games[0]?.input_coverage.home_pitcher_handedness).toBe("L");
+    expect(board.games[0]?.input_coverage.away_lineup_avg_woba).toBeCloseTo(0.336);
+    expect(board.games[0]?.input_coverage.home_lineup_avg_woba).toBeCloseTo(0.327);
+    expect(board.games[0]?.input_coverage.away_woba_batter_count).toBe(9);
+    expect(board.games[0]?.input_coverage.home_woba_batter_count).toBe(9);
   });
 
   it("builds a player board contract with identity and matchup context", async () => {
@@ -240,6 +249,88 @@ describe("phase 9 services", () => {
     expect(batter?.batting_order).toBe(1);
     expect(batter?.matchup).toBe("New York Yankees at Boston Red Sox");
     expect(batter?.projection.fantasy_summary?.projected_points).toBeGreaterThan(0);
+  });
+});
+
+describe("buildScheduleBoard input_coverage", () => {
+  const boardCounts = {
+    fetched_raw: 1,
+    parsed: 1,
+    normalized: 1,
+    prepared: 1,
+    boxscore_enriched: 1
+  } as const;
+
+  const parseResult = parseMlbStatsApiGamePayload(rawFixture);
+  const normalizeResult = parseResult.success ? normalizeMlbStatsApiGame(parseResult.data) : null;
+
+  const buildGame = (preparedOverride: Record<string, unknown>) => {
+    if (!parseResult.success) throw new Error(parseResult.error);
+    if (!normalizeResult?.success) throw new Error("normalize failed");
+    return {
+      parsedGame: parseResult.data,
+      canonicalGame: normalizeResult.data,
+      preparedGame: { ...prepared, ...preparedOverride } as unknown as PreparedGameInputs,
+      playerIdentities: {} as const
+    };
+  };
+
+  it("surfaces 'unknown' handedness when starters are null", () => {
+    const board = buildScheduleBoard(
+      [buildGame({ away_starter: null, home_starter: null })],
+      { source: "test", date: "2026-04-22", counts: boardCounts }
+    );
+    expect(board.games[0]?.input_coverage.away_pitcher_handedness).toBe("unknown");
+    expect(board.games[0]?.input_coverage.home_pitcher_handedness).toBe("unknown");
+  });
+
+  it("surfaces null lineup_avg_woba when unresolved for both teams", () => {
+    const board = buildScheduleBoard(
+      [buildGame({
+        away_team: { ...prepared.away_team, lineup_avg_woba: null },
+        home_team: { ...prepared.home_team, lineup_avg_woba: null }
+      })],
+      { source: "test", date: "2026-04-22", counts: boardCounts }
+    );
+    expect(board.games[0]?.input_coverage.away_lineup_avg_woba).toBeNull();
+    expect(board.games[0]?.input_coverage.home_lineup_avg_woba).toBeNull();
+  });
+
+  it("returns zero away count when no batter has season_woba populated", () => {
+    const board = buildScheduleBoard(
+      [buildGame({
+        away_batters: prepared.away_batters.map((b) => ({ ...b, season_woba: null }))
+      })],
+      { source: "test", date: "2026-04-22", counts: boardCounts }
+    );
+    expect(board.games[0]?.input_coverage.away_woba_batter_count).toBe(0);
+    // home batters unchanged — all 9 have non-null season_woba in the fixture
+    expect(board.games[0]?.input_coverage.home_woba_batter_count).toBe(9);
+  });
+
+  it("counts exactly 6 when only the first 6 away batters have season_woba populated", () => {
+    const board = buildScheduleBoard(
+      [buildGame({
+        away_batters: prepared.away_batters.map((b, i) => ({ ...b, season_woba: i < 6 ? b.season_woba : null }))
+      })],
+      { source: "test", date: "2026-04-22", counts: boardCounts }
+    );
+    expect(board.games[0]?.input_coverage.away_woba_batter_count).toBe(6);
+  });
+
+  it("survives parseScheduleBoardPayload round-trip with all input_coverage fields intact", () => {
+    const board = buildScheduleBoard(
+      [buildGame({})],
+      { source: "mlb-statsapi-live", date: "2026-04-22", counts: boardCounts }
+    );
+    const roundTripped = parseScheduleBoardPayload(JSON.parse(JSON.stringify(board)));
+    const coverage = roundTripped.games[0]?.input_coverage;
+    expect(coverage?.away_pitcher_handedness).toBe("R");
+    expect(coverage?.home_pitcher_handedness).toBe("L");
+    expect(coverage?.away_lineup_avg_woba).toBeCloseTo(0.336);
+    expect(coverage?.home_lineup_avg_woba).toBeCloseTo(0.327);
+    expect(coverage?.away_woba_batter_count).toBe(9);
+    expect(coverage?.home_woba_batter_count).toBe(9);
   });
 });
 

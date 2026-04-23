@@ -1,5 +1,6 @@
 import type {
   ScheduleBoardGame,
+  ScheduleBoardInputCoverage,
   ScheduleBoardPayload,
   ScheduleBoardProjection,
   ScheduleBoardPlayerProjectionStatus,
@@ -251,6 +252,30 @@ const parseScheduleBoardWeather = (value: unknown): ScheduleBoardWeather | null 
   };
 };
 
+const parseScheduleBoardInputCoverage = (value: unknown): ScheduleBoardInputCoverage => {
+  if (!isRecord(value)) {
+    throw new Error("Schedule board payload has invalid input_coverage block.");
+  }
+
+  const readNullableNumber = (fieldName: string): number | null => {
+    const fieldValue = value[fieldName];
+    if (fieldValue === null || fieldValue === undefined) return null;
+    if (typeof fieldValue !== "number" || !Number.isFinite(fieldValue)) {
+      throw new Error(`Schedule board payload has invalid input_coverage ${fieldName}.`);
+    }
+    return fieldValue;
+  };
+
+  return {
+    away_pitcher_handedness: readHandedness(value, "away_pitcher_handedness"),
+    home_pitcher_handedness: readHandedness(value, "home_pitcher_handedness"),
+    away_lineup_avg_woba: readNullableNumber("away_lineup_avg_woba"),
+    home_lineup_avg_woba: readNullableNumber("home_lineup_avg_woba"),
+    away_woba_batter_count: readNumber(value, "away_woba_batter_count"),
+    home_woba_batter_count: readNumber(value, "home_woba_batter_count")
+  };
+};
+
 const parseScheduleBoardGame = (value: unknown): ScheduleBoardGame => {
   if (!isRecord(value)) {
     throw new Error("Schedule board payload has invalid game.");
@@ -271,7 +296,8 @@ const parseScheduleBoardGame = (value: unknown): ScheduleBoardGame => {
       "player_projection_status"
     ),
     projection: parseScheduleBoardProjection(value.projection),
-    weather: parseScheduleBoardWeather(value.weather)
+    weather: parseScheduleBoardWeather(value.weather),
+    input_coverage: parseScheduleBoardInputCoverage(value.input_coverage)
   };
 };
 
