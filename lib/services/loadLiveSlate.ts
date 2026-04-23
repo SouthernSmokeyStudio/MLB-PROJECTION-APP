@@ -970,19 +970,25 @@ export const loadLiveSlate = async (
             ? extracted.data.home_batters
             : (merged.home.lineup?.entries.map(buildProjectedBatterInputs) ?? []);
 
-        // Enrich projected-lineup batters (identified by null season_avg) with
-        // real season batting stats from the MLB Stats API.  Numeric player IDs
-        // are resolved from the pre-game boxscore roster, which carries player
-        // entries even before batting-order data exists.  Fails closed: batters
-        // whose IDs cannot be resolved or whose stat fetch fails remain as-is.
+        // Enrich prepared batters when core season batting fields are still
+        // incomplete. Boxscore-derived batters can already carry season_avg
+        // while season_woba remains null, so gating only on season_avg would
+        // skip the MLB Stats API overlay and leave lineup_avg_woba unusable.
+        // Numeric player IDs are resolved from the pre-game boxscore roster,
+        // which carries player entries even before batting-order data exists.
+        // Fails closed: batters whose IDs cannot be resolved or whose stat fetch
+        // fails remain as-is.
         const enrichSide = async (
           batters: readonly PreparedBatterInputs[],
           side: "away" | "home"
         ): Promise<readonly PreparedBatterInputs[]> => {
-          if (!batters.some(b => b.season_avg === null)) return batters;
+          const needsSeasonStats = (batter: PreparedBatterInputs): boolean =>
+            batter.season_avg === null || batter.season_woba === null;
+
+          if (!batters.some(needsSeasonStats)) return batters;
           return Promise.all(
             batters.map(async b => {
-              if (b.season_avg !== null) return b;
+              if (!needsSeasonStats(b)) return b;
               const numericId = findBoxscorePlayerNumericId(fetchedBoxscore.data, side, b.player_id);
               if (numericId === null) return b;
               const result = await fetchMlbStatsApiBatterSeasonStats(numericId, season);

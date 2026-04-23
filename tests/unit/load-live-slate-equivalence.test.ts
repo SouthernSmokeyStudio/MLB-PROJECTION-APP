@@ -38,6 +38,7 @@ vi.mock("@lib/adapters/mlbStatsApi", async () => {
     ...actual,
     fetchAndParseMlbStatsApiSchedule: vi.fn(),
     fetchMlbStatsApiBoxscore: vi.fn(),
+    fetchMlbStatsApiBatterSeasonStats: vi.fn(),
     fetchMlbStatsApiLinescore: vi.fn(),
     fetchMlbStatsApiPitcherSeasonStats: vi.fn()
   };
@@ -48,6 +49,7 @@ import { buildPlayerBoard } from "../../lib/services/buildPlayerBoard";
 import { buildScheduleBoard } from "../../lib/services/buildScheduleBoard";
 import {
   fetchAndParseMlbStatsApiSchedule,
+  fetchMlbStatsApiBatterSeasonStats,
   fetchMlbStatsApiBoxscore,
   fetchMlbStatsApiLinescore,
   fetchMlbStatsApiPitcherSeasonStats
@@ -93,6 +95,32 @@ const pitcherStatsPayload = {
             strikeoutsPer9Inn: "9.5",
             walksPer9Inn: "2.2",
             homeRunsPer9: "0.8"
+          }
+        }
+      ]
+    }
+  ]
+};
+
+const batterStatsPayload = {
+  stats: [
+    {
+      splits: [
+        {
+          stat: {
+            plateAppearances: "100",
+            avg: ".270",
+            obp: ".340",
+            slg: ".450",
+            strikeOuts: "20",
+            baseOnBalls: "10",
+            intentionalWalks: "0",
+            hitByPitch: "2",
+            hits: "27",
+            doubles: "5",
+            triples: "1",
+            homeRuns: "5",
+            stolenBases: "2"
           }
         }
       ]
@@ -439,6 +467,10 @@ describe("loadLiveSlate - projected starter flow into preparation", () => {
       success: true,
       data: pitcherStatsPayload
     } as never);
+    vi.mocked(fetchMlbStatsApiBatterSeasonStats).mockResolvedValue({
+      success: true,
+      data: batterStatsPayload
+    } as never);
     mockTeamStatFetches();
   };
 
@@ -474,6 +506,26 @@ describe("loadLiveSlate - projected starter flow into preparation", () => {
     expect(cards.players.length).toBeGreaterThan(0);
     expect(fetchMlbStatsApiPitcherSeasonStats).toHaveBeenCalledWith(543037, "2026");
     expect(fetchMlbStatsApiPitcherSeasonStats).toHaveBeenCalledWith(519242, "2026");
+  });
+
+  it("enrichs boxscore batters when season_woba is null even if season_avg is already populated", async () => {
+    mockOneGameScheduleAndBoxscore();
+
+    const result = await loadLiveSlate("2026-03-27", {
+      projectedGames: new Map([[projectedGame.game_id, projectedGame]])
+    });
+
+    expect(result.success).toBe(true);
+    if (!result.success) throw new Error(result.error);
+
+    const prepared = result.data.games[0]?.preparedGame;
+    expect(prepared).toBeDefined();
+    expect(prepared?.away_batters[0]?.season_avg).toBe(0.27);
+    expect(prepared?.home_batters[0]?.season_avg).toBe(0.27);
+    expect(prepared?.away_batters[0]?.season_woba).toBe(0.408);
+    expect(prepared?.home_batters[0]?.season_woba).toBe(0.408);
+    expect(fetchMlbStatsApiBatterSeasonStats).toHaveBeenCalledWith(100001, "2026");
+    expect(fetchMlbStatsApiBatterSeasonStats).toHaveBeenCalledWith(200001, "2026");
   });
 
   it("applies TBD fallback starters when no official, projected, or inferred starter source exists", async () => {
